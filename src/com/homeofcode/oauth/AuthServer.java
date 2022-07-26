@@ -160,7 +160,6 @@ public class AuthServer {
         var spec = cmdline.getCommandSpec();
         spec.usageMessage().autoWidth(true);
         screenWidth = spec.usageMessage().width();
-        System.out.println("Screen width is " + screenWidth);
     }
 
     public static void main(String[] args) {
