@@ -3,6 +3,7 @@ package com.homeofcode.https;
 import com.homeofcode.oauth.AuthServer;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
+import com.sun.net.httpserver.HttpServer;
 import com.sun.net.httpserver.HttpsConfigurator;
 import com.sun.net.httpserver.HttpsServer;
 
@@ -47,25 +48,29 @@ public class SimpleHttpsServer {
     private static final String pemCertConst = "BEGIN CERTIFICATE";
     private static final Pattern pemRE = Pattern.compile("---*([^-\n]+)-+\n([^-]+)\n---*([^-]+)-+\n");
     static System.Logger LOG = System.getLogger(SimpleHttpsServer.class.getPackageName());
-    private final HttpsServer httpsServer;
+    private final HttpServer httpsServer;
 
-    public SimpleHttpsServer() throws IOException, NoSuchAlgorithmException {
-        SSLContext sslContext = SSLContext.getInstance("TLS");
-        try {
-            KeyStore ks = getKeyStore();
-            KeyManagerFactory kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
-            kmf.init(ks, noPass);
-            TrustManagerFactory tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
-            tmf.init(ks);
-            sslContext.init(kmf.getKeyManagers(), tmf.getTrustManagers(), null);
-        } catch (Exception e) {
-            System.out.println(e.getMessage());
-            System.exit(2);
+    public SimpleHttpsServer(int port, boolean useTLS) throws IOException, NoSuchAlgorithmException {
+        if (useTLS) {
+            SSLContext sslContext = SSLContext.getInstance("TLS");
+            try {
+                KeyStore ks = getKeyStore();
+                KeyManagerFactory kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
+                kmf.init(ks, noPass);
+                TrustManagerFactory tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+                tmf.init(ks);
+                sslContext.init(kmf.getKeyManagers(), tmf.getTrustManagers(), null);
+            } catch (Exception e) {
+                System.out.println(e.getMessage());
+                System.exit(2);
+            }
+            var tlsServer = HttpsServer.create();
+            tlsServer.setHttpsConfigurator(new HttpsConfigurator(sslContext));
+            httpsServer = tlsServer;
+        } else {
+            httpsServer = HttpServer.create();
         }
-
-        httpsServer = HttpsServer.create();
-        httpsServer.bind(new InetSocketAddress(443), 10);
-        httpsServer.setHttpsConfigurator(new HttpsConfigurator(sslContext));
+        httpsServer.bind(new InetSocketAddress(port), 10);
     }
 
     private static byte[] getPemBytes(Path path, String pemConst) throws IOException {

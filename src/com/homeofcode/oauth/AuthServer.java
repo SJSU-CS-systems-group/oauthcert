@@ -19,12 +19,12 @@ import java.net.URLEncoder;
 import java.nio.charset.Charset;
 import java.security.NoSuchAlgorithmException;
 import java.sql.Connection;
+import java.sql.Date;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.Base64;
-import java.sql.Date;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.Properties;
@@ -120,36 +120,10 @@ public class AuthServer {
     }
 
     static private String getResource(String path) throws IOException {
-        var stream = AuthServer.class.getResourceAsStream(path);
-        if (stream == null) throw new FileNotFoundException(path);
-        return new String(stream.readAllBytes());
-    }
-
-    void checkAuthTable() throws SQLException {
-        var stmt = connection.createStatement();
-        var metaData = connection.getMetaData();
-        stmt.execute("""
-                create table if not exists authRecords (
-                discordSnowflake text primary key,
-                discordId text,
-                email text,
-                verifyDate date
-                );""");
-    }
-
-    void updateAuthRecord(String discordSnowflake, String discordId, String email, Date date) throws SQLException {
-        var stmt = connection.prepareStatement("""
-                replace into authRecords (
-                discordSnowflake,
-                discordId,
-                email,
-                verifyDate
-                ) values (?,?,?,?);""");
-        stmt.setString(1, discordSnowflake);
-        stmt.setString(2, discordId);
-        stmt.setString(3, email);
-        stmt.setDate(4, date);
-        stmt.execute();
+        try (var stream = AuthServer.class.getResourceAsStream(path)) {
+            if (stream == null) throw new FileNotFoundException(path);
+            return new String(stream.readAllBytes());
+        }
     }
 
     private static void redirect(HttpExchange exchange, String redirectURL) throws IOException {
@@ -189,6 +163,41 @@ public class AuthServer {
         System.exit(exitCode);
     }
 
+    private static String getProperty(Properties properties, String key) {
+        var value = properties.getProperty(key);
+        if (value == null) {
+            System.out.printf("%s property missing from property file\n", key);
+            System.exit(1);
+        }
+        return value;
+    }
+
+    void checkAuthTable() throws SQLException {
+        var stmt = connection.createStatement();
+        stmt.execute("""
+                create table if not exists authRecords (
+                discordSnowflake text primary key,
+                discordId text,
+                email text,
+                verifyDate date
+                );""");
+    }
+
+    void updateAuthRecord(String discordSnowflake, String discordId, String email, Date date) throws SQLException {
+        var stmt = connection.prepareStatement("""
+                replace into authRecords (
+                discordSnowflake,
+                discordId,
+                email,
+                verifyDate
+                ) values (?,?,?,?);""");
+        stmt.setString(1, discordSnowflake);
+        stmt.setString(2, discordId);
+        stmt.setString(3, email);
+        stmt.setDate(4, date);
+        stmt.execute();
+    }
+
     private String createAuthURL(NonceRecord nonceRecord) {
         return authEndpoint +
                 "?response_type=code&scope=openid%20email" +
@@ -214,7 +223,7 @@ public class AuthServer {
             }
         }
         for (var key : toDelete) {
-            var nr  = nonces.remove(key);
+            var nr = nonces.remove(key);
             nr.complete(null);
         }
         if (nextExpire != null) {
@@ -233,15 +242,6 @@ public class AuthServer {
         }
         nonces.put(nonceRecord.nonce, nonceRecord);
         return nonceRecord;
-    }
-
-    private static String getProperty(Properties properties, String key) {
-        var value = properties.getProperty(key);
-        if (value == null) {
-            System.out.printf("%s property missing from property file\n", key);
-            System.exit(1);
-        }
-        return value;
     }
 
     @HttpPath(path = "/test")
@@ -327,6 +327,10 @@ public class AuthServer {
         sendOKResponse(exchange, response);
     }
 
+    String getValidateURL(NonceRecord nr) {
+        return String.format("%s/login?nonce=%s", httpsURLPrefix, nr.nonce);
+    }
+
     record NonceRecord(String nonce, String state, LocalDateTime expireTime,
                        CompletableFuture<String> future) {
         void complete(String email) {
@@ -334,19 +338,69 @@ public class AuthServer {
         }
     }
 
-    String getValidateURL(NonceRecord nr) {
-        return String.format("%s/login?nonce=%s", httpsURLPrefix, nr.nonce);
-    }
-
-
-
     @CommandLine.Command(name = "server", mixinStandardHelpOptions = true,
             description = "implements a simple HTTPS server for validating email addresses associated with discord " +
                     "ids using oath.")
     static class Cli implements Callable<Integer> {
 
+        static {
+            // make sure we don't miss any exceptions
+            Thread.setDefaultUncaughtExceptionHandler((t, te) -> te.printStackTrace());
+            System.setProperty("java.util.logging.SimpleFormatter.format", "%1$tF %1$tT %4$s %5$s%n");
+        }
+
+        static void error(String message) {
+            System.out.println(CommandLine.Help.Ansi.AUTO.string("@|red " + message + "|@"));
+        }
+
+        static void info(String message) {
+            System.out.println(CommandLine.Help.Ansi.AUTO.string("@|blue " + message + "|@"));
+        }
+
         @Override
         public Integer call() {
+            CommandLine.usage(this, System.out);
+            return 1;
+        }
+
+        @CommandLine.Command(name = "config", mixinStandardHelpOptions = true,
+                description = "check the config file and provide guidance if needed.")
+        int config(@CommandLine.Parameters(paramLabel = "prop_file",
+                description = "property file containing config and creds.")
+                   FileReader propFile) {
+            var props = new Properties();
+            try {
+                props.load(propFile);
+                if (props.get("clientId") == null || props.get("clientSecret") == null) {
+                    error("""
+                            you haven't specified the clientId and clientSecret in the config file. you can obtain them at https://console.cloud.google.com/apis/credentials.
+                            create the following lines in the config file:
+                            clientId=CLIENTID_FROM_GOOGLE
+                            clientSecret=CLIENTSECRET_FROM_GOOGLE""");
+                } else {
+                    info("clientId and clientSecret look OK.");
+                }
+                if (props.get("redirectURL") == null) {
+                    error("missing redirectURL in the config. this will be the URL to redirect the " +
+                            "browser to after google has authenticated the client.");
+                } else {
+                    info("redirectURL is set.");
+                }
+                if (props.get("authDomain") == null) {
+                    error("missing authDomain in the config. this should specify a domain name of the id, like sjsu" +
+                            ".edu .");
+                } else {
+                    info("authDomain is set.");
+                }
+                if (props.get("authDBFile") == null) {
+                    error("missing the authDBFile string. this is the location of a sqlite DB.");
+                } else {
+                    info("authDBFIle is set.");
+                }
+            } catch (IOException e) {
+                System.out.printf("couldn't read config file: %s\n", e.getMessage());
+                return 2;
+            }
             return 0;
         }
 
@@ -354,19 +408,23 @@ public class AuthServer {
                 description = "start https verify endpoint.")
         int serve(@CommandLine.Parameters(paramLabel = "prop_file",
                 description = "property file containing config and creds.")
-                          FileReader propFile) {
+                  FileReader propFile,
+                  @CommandLine.Option(names = "--port", required = false, defaultValue = "443",
+                          description = "TCP port to listen for web connections.",
+                          showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
+                  int port,
+                  @CommandLine.Option(names = "--noTLS", required = false,
+                          description = "turn off TLS for web connections.",
+                          showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
+                  boolean noTLS
+        ) {
             try {
-                Thread.setDefaultUncaughtExceptionHandler((t, te) -> {
-                    te.printStackTrace();
-                });
-                System.setProperty("java.util.logging.SimpleFormatter.format", "%1$tF %1$tT %4$s %5$s%n");
-
                 var props = new Properties();
                 props.load(propFile);
 
                 var authServer = new AuthServer(props);
 
-                var simpleHttpsServer = new SimpleHttpsServer();
+                var simpleHttpsServer = new SimpleHttpsServer(port, !noTLS);
                 var added = simpleHttpsServer.addToHttpsServer(authServer);
                 for (var add : added) {
                     LOG.log(INFO, "added {0}", add);
@@ -376,7 +434,7 @@ public class AuthServer {
                 while (true) {
                     Thread.sleep(1000000);
                 }
-            } catch (IOException|NoSuchAlgorithmException|InterruptedException e) {
+            } catch (IOException | NoSuchAlgorithmException | InterruptedException e) {
                 e.printStackTrace();
             }
             return 0;
