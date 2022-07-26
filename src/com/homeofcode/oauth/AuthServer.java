@@ -5,6 +5,7 @@ import com.homeofcode.https.SimpleHttpsServer;
 import com.sun.net.httpserver.HttpExchange;
 import org.json.JSONObject;
 import picocli.CommandLine;
+import picocli.CommandLine.Help;
 
 import javax.net.ssl.HttpsURLConnection;
 import java.io.ByteArrayOutputStream;
@@ -46,6 +47,9 @@ public class AuthServer {
     static System.Logger LOG = System.getLogger(AuthServer.class.getPackageName());
     static String errorHTML;
     static String successHTML;
+
+    // this will be filled in by setUpOutput and used by error() and info()
+    static int screenWidth;
 
     static {
         try {
@@ -152,15 +156,22 @@ public class AuthServer {
         }
     }
 
+    private static void setupOutput(CommandLine cmdline) {
+        var spec = cmdline.getCommandSpec();
+        spec.usageMessage().autoWidth(true);
+        screenWidth = spec.usageMessage().width();
+    }
+
     public static void main(String[] args) {
-        int exitCode =
-                new CommandLine(new Cli()).registerConverter(FileReader.class, s -> {
-                    try {
-                        return new FileReader(s);
-                    } catch (Exception e) {
-                        throw new CommandLine.TypeConversionException(e.getMessage());
-                    }
-                }).execute(args);
+        var commandLine = new CommandLine(new Cli()).registerConverter(FileReader.class, s -> {
+            try {
+                return new FileReader(s);
+            } catch (Exception e) {
+                throw new CommandLine.TypeConversionException(e.getMessage());
+            }
+        });
+        setupOutput(commandLine);
+        int exitCode = commandLine.execute(args);
         System.exit(exitCode);
     }
 
@@ -350,12 +361,20 @@ public class AuthServer {
             System.setProperty("java.util.logging.SimpleFormatter.format", "%1$tF %1$tT %4$s %5$s%n");
         }
 
+        static void wrapOutput(String str) {
+            var line = new Help.Column(screenWidth, 0, Help.Column.Overflow.WRAP);
+            var txtTable = Help.TextTable.forColumns(Help.defaultColorScheme(Help.Ansi.AUTO), new Help.Column[] {line});
+            txtTable.indentWrappedLines = 0;
+            txtTable.addRowValues(str);
+            System.out.print(txtTable.toString());
+            System.out.flush();
+        }
         static void error(String message) {
-            System.out.println(CommandLine.Help.Ansi.AUTO.string("@|red " + message + "|@"));
+            wrapOutput(Help.Ansi.AUTO.string("@|red " + message + "|@"));
         }
 
         static void info(String message) {
-            System.out.println(CommandLine.Help.Ansi.AUTO.string("@|blue " + message + "|@"));
+            wrapOutput(Help.Ansi.AUTO.string("@|blue " + message + "|@"));
         }
 
         @Override
@@ -415,11 +434,11 @@ public class AuthServer {
                   FileReader propFile,
                   @CommandLine.Option(names = "--port", required = false, defaultValue = "443",
                           description = "TCP port to listen for web connections.",
-                          showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
+                          showDefaultValue = Help.Visibility.ALWAYS)
                   int port,
                   @CommandLine.Option(names = "--noTLS", required = false,
                           description = "turn off TLS for web connections.",
-                          showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
+                          showDefaultValue = Help.Visibility.ALWAYS)
                   boolean noTLS
         ) {
             try {
