@@ -42,6 +42,7 @@ import static java.net.HttpURLConnection.HTTP_OK;
 
 public class AuthServer {
     final static String OPEN_ID_ENDPT = "https://accounts.google.com/.well-known/openid-configuration";
+    public static final String LOGIN_CALLBACK = "/login/callback";
     static System.Logger LOG = System.getLogger(AuthServer.class.getPackageName());
     static String errorHTML;
     static String successHTML;
@@ -258,7 +259,7 @@ public class AuthServer {
         redirect(exchange, authURL);
     }
 
-    @HttpPath(path = "/login/callback")
+    @HttpPath(path = LOGIN_CALLBACK)
     public void loginCallback(HttpExchange exchange) throws Exception {
         HashMap<String, String> params = extractParams(exchange);
         exchange.getRequestBody().close();
@@ -380,9 +381,12 @@ public class AuthServer {
                 } else {
                     info("clientId and clientSecret look OK.");
                 }
-                if (props.get("redirectURL") == null) {
+                String redirectURL = (String)props.get("redirectURL");
+                if (redirectURL == null) {
                     error("missing redirectURL in the config. this will be the URL to redirect the " +
                             "browser to after google has authenticated the client.");
+                } else if (!redirectURL.startsWith("http") || !redirectURL.endsWith(LOGIN_CALLBACK)) {
+                    error(String.format("redirectURL must start with http and end with %s.", LOGIN_CALLBACK));
                 } else {
                     info("redirectURL is set.");
                 }
