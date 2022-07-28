@@ -31,6 +31,7 @@ import java.security.spec.InvalidKeySpecException;
 import java.security.spec.PKCS8EncodedKeySpec;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.concurrent.Executors;
 import java.util.regex.Pattern;
 
 import static java.net.HttpURLConnection.HTTP_INTERNAL_ERROR;
@@ -70,6 +71,8 @@ public class SimpleHttpsServer {
         } else {
             httpsServer = HttpServer.create();
         }
+        // the default executor doesn't create a thread which causes big problems with things like file upload
+        httpsServer.setExecutor(Executors.newCachedThreadPool());
         httpsServer.bind(new InetSocketAddress(port), 10);
     }
 
