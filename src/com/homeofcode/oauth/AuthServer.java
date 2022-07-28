@@ -18,6 +18,7 @@ import java.net.URL;
 import java.net.URLDecoder;
 import java.net.URLEncoder;
 import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.security.NoSuchAlgorithmException;
 import java.sql.Connection;
 import java.sql.Date;
@@ -47,6 +48,8 @@ public class AuthServer {
     static System.Logger LOG = System.getLogger(AuthServer.class.getPackageName());
     static String errorHTML;
     static String successHTML;
+    static String uploadHTML;
+
 
     // this will be filled in by setUpOutput and used by error() and info()
     static int screenWidth;
@@ -55,6 +58,7 @@ public class AuthServer {
         try {
             errorHTML = getResource("/pages/error.html");
             successHTML = getResource("/pages/success.html");
+            uploadHTML = getResource("/pages/upload.html");
         } catch (IOException e) {
             e.printStackTrace();
             System.exit(1);
@@ -260,6 +264,25 @@ public class AuthServer {
     public void testPage(HttpExchange exchange) throws Exception {
         var nr = createValidation();
         redirect(exchange, getValidateURL(nr));
+    }
+
+    @HttpPath(path = "/")
+    public void rootPage(HttpExchange exchange) throws Exception {
+        System.out.println("Reached upload page");
+        sendOKResponse(exchange, uploadHTML.getBytes());
+    }
+
+    @HttpPath(path = "/upload")
+    public void uploadPage(HttpExchange exchange) throws Exception{
+        var dataCSR = exchange.getRequestBody();
+
+        int C;
+
+        while ((C = exchange.getRequestBody().read()) != -1){
+            System.out.write(C);
+        }
+
+        //look up HttpExchange file upload
     }
 
     @HttpPath(path = "/login")
