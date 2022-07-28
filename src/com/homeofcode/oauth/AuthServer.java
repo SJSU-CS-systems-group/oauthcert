@@ -160,9 +160,6 @@ public class AuthServer {
         }
     }
 
-    //Retrieving the file
-
-
     private static void setupOutput(CommandLine cmdline) {
         var spec = cmdline.getCommandSpec();
         spec.usageMessage().autoWidth(true);
@@ -287,9 +284,6 @@ public class AuthServer {
 
         //look up HttpExchange file upload
     }
-    /*
-    Make one more HttpPath for /upload
-     */
 
     @HttpPath(path = "/login")
     synchronized public void loginPage(HttpExchange exchange) throws Exception {
