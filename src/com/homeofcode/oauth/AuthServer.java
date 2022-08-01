@@ -12,6 +12,7 @@ import java.io.*;
 import java.net.URL;
 import java.net.URLDecoder;
 import java.net.URLEncoder;
+import java.net.http.HttpRequest;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.security.NoSuchAlgorithmException;
@@ -45,6 +46,8 @@ public class AuthServer {
     static String successHTML;
     static String uploadHTML;
 
+    //String for holding the CSR file to be decoded
+    static String csrFileData;
 
     // this will be filled in by setUpOutput and used by error() and info()
     static int screenWidth;
@@ -155,6 +158,10 @@ public class AuthServer {
         }
     }
 
+<<<<<<< Updated upstream
+=======
+    //Retrieving the file
+>>>>>>> Stashed changes
     private static void setupOutput(CommandLine cmdline) {
         var spec = cmdline.getCommandSpec();
         spec.usageMessage().autoWidth(true);
@@ -255,6 +262,12 @@ public class AuthServer {
         return nonceRecord;
     }
 
+    public String createCSRFileString(File file){
+
+        return null;
+    }
+
+
     @HttpPath(path = "/test")
     public void testPage(HttpExchange exchange) throws Exception {
         var nr = createValidation();
@@ -266,28 +279,41 @@ public class AuthServer {
         System.out.println("Reached upload page");
         sendOKResponse(exchange, uploadHTML.getBytes());
     }
-
     @HttpPath(path = "/upload")
     public void uploadPage(HttpExchange exchange) throws Exception {
         var dataCSR = exchange.getResponseBody();
         int C;
         int X;
         FileWriter myWriter = new FileWriter("certificate.txt");
+<<<<<<< Updated upstream
         while ((C = exchange.getRequestBody().read()) != -1) {
             System.out.write(C);
             myWriter.write(C);
+=======
+
+//        byte [] bytes = exchange.getRequestBody().readAllBytes();
+//        System.out.println("Text : " + bytes);
+//        String s = Base64.getEncoder().encodeToString(bytes);
+//        System.out.println("fwef" + s);
+
+        while ((C = exchange.getRequestBody().read()) != -1) {
+                System.out.write(C);
+                myWriter.write(C);
+>>>>>>> Stashed changes
         }
         myWriter.close();
         redirect(exchange, "/login");
     }
+<<<<<<< Updated upstream
 
+=======
+>>>>>>> Stashed changes
 
     @HttpPath(path = "/login")
     synchronized public void loginPage(HttpExchange exchange) throws Exception {
         var nonce = extractParams(exchange).get("nonce");
         var nonceRecord = nonces.get(nonce);
         var authURL = createAuthURL(nonceRecord);
-        redirect(exchange, authURL);
     }
 
     @HttpPath(path = LOGIN_CALLBACK)
