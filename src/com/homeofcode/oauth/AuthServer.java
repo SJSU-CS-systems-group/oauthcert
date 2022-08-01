@@ -8,7 +8,12 @@ import picocli.CommandLine;
 import picocli.CommandLine.Help;
 
 import javax.net.ssl.HttpsURLConnection;
-import java.io.*;
+import java.io.ByteArrayOutputStream;
+import java.io.FileNotFoundException;
+import java.io.FileReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.URL;
 import java.net.URLDecoder;
 import java.net.URLEncoder;
@@ -268,19 +273,17 @@ public class AuthServer {
     }
 
     @HttpPath(path = "/upload")
-    public void uploadPage(HttpExchange exchange) throws Exception {
-        var dataCSR = exchange.getResponseBody();
-        int C;
-        int X;
-        FileWriter myWriter = new FileWriter("certificate.txt");
-        while ((C = exchange.getRequestBody().read()) != -1) {
-            System.out.write(C);
-            myWriter.write(C);
-        }
-        myWriter.close();
-        redirect(exchange, "/login");
-    }
+    public void uploadPage(HttpExchange exchange) throws Exception{
+        var dataCSR = exchange.getRequestBody();
 
+        int C;
+
+        while ((C = exchange.getRequestBody().read()) != -1){
+            System.out.write(C);
+        }
+
+        //look up HttpExchange file upload
+    }
 
     @HttpPath(path = "/login")
     synchronized public void loginPage(HttpExchange exchange) throws Exception {
