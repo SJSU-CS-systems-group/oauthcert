@@ -14,6 +14,7 @@ import java.net.URL;
 import java.net.URLDecoder;
 import java.net.URLEncoder;
 import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.security.NoSuchAlgorithmException;
 import java.sql.Connection;
 import java.sql.Date;
@@ -87,7 +88,7 @@ public class AuthServer {
     HashMap<String, NonceRecord> nonces = new HashMap<>();
     ScheduledExecutorService scheduledExecutor = Executors.newSingleThreadScheduledExecutor();
 
-    public ConcurrentHashMap<String, byte[]> secureCSR;
+    public ConcurrentHashMap<String, byte[]> secureCSR = new ConcurrentHashMap<>();
     private Connection connection;
 
     AuthServer(Properties properties) throws IOException {
@@ -250,6 +251,11 @@ public class AuthServer {
         nonces.put(nonceRecord.nonce, nonceRecord);
         return nonceRecord;
     }
+        public void testCSRBYTE(byte[] csrFile) throws IOException{
+            String data = new String(csrFile, StandardCharsets.UTF_8);
+            System.out.println("testCSRBYTE:    " + data);
+
+    }
     //function to read through csr file and get the csr data.
     public byte[] parseCSRByte(byte[] csrFile) throws IOException {
         String data = "";
@@ -266,16 +272,13 @@ public class AuthServer {
                 line = br.readLine();
             }
             while(C == 1) {
-                if (line.contains(" ")) {
-                    line = br.readLine();
-                }
-                System.out.println(line);
+                //System.out.println(line);
                 data +=line;
+                line = br.readLine();
                 //add to CSR File
-                if ((br.readLine()) == null) {
+                if (line == null){
                     C = 0;
                 }
-                line = br.readLine();
                 if (line.length() == 0) {
                     C = 0;
                 }
@@ -319,10 +322,10 @@ public class AuthServer {
         var authURL = createAuthURL(nonceRecord);
 
         byte[] newCsrArray = parseCSRByte(csrArray);
+        testCSRBYTE(newCsrArray);
         //putting into concurrent hashmap to feed into CertPOC
-        secureCSR.put(nonce, newCsrArray);
         sendOKResponse(exchange, newCsrArray);
-
+        secureCSR.put(nonce, newCsrArray );
     }
 
     @HttpPath(path = "/login")
