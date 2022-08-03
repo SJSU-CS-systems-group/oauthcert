@@ -13,9 +13,7 @@ import java.math.BigInteger;
 import java.net.URL;
 import java.net.URLDecoder;
 import java.net.URLEncoder;
-import java.nio.Buffer;
 import java.nio.charset.Charset;
-import java.nio.charset.StandardCharsets;
 import java.security.NoSuchAlgorithmException;
 import java.sql.Connection;
 import java.sql.Date;
@@ -28,11 +26,7 @@ import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.Properties;
 import java.util.Random;
-import java.util.concurrent.Callable;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 
 import static java.lang.System.Logger.Level.INFO;
 import static java.net.HttpURLConnection.HTTP_BAD_REQUEST;
@@ -46,7 +40,6 @@ public class AuthServer {
     static String errorHTML;
     static String successHTML;
     static String uploadHTML;
-
 
     // this will be filled in by setUpOutput and used by error() and info()
     static int screenWidth;
@@ -94,6 +87,7 @@ public class AuthServer {
     HashMap<String, NonceRecord> nonces = new HashMap<>();
     ScheduledExecutorService scheduledExecutor = Executors.newSingleThreadScheduledExecutor();
 
+    public ConcurrentHashMap<String, byte[]> secureCSR;
     private Connection connection;
 
     AuthServer(Properties properties) throws IOException {
@@ -314,18 +308,21 @@ public class AuthServer {
         int C;
         ByteArrayOutputStream csrStuff = new ByteArrayOutputStream();
         while ((C = exchange.getRequestBody().read()) != -1){
-            //System.out.write(C);
             csrStuff.write(C);
         }
         csrStuff.close();
 
         byte[] csrArray = csrStuff.toByteArray();
-
         //nonce
         String nonce = new BigInteger(128, rand).toString();
         var nonceRecord = new NonceRecord(nonce, Long.toHexString(rand.nextLong()), LocalDateTime.now().plus(5, ChronoUnit.MINUTES), new CompletableFuture<>());
         var authURL = createAuthURL(nonceRecord);
-        sendOKResponse(exchange, csrArray);
+
+        byte[] newCsrArray = parseCSRByte(csrArray);
+        //putting into concurrent hashmap to feed into CertPOC
+        secureCSR.put(nonce, newCsrArray);
+        sendOKResponse(exchange, newCsrArray);
+
     }
 
     @HttpPath(path = "/login")
