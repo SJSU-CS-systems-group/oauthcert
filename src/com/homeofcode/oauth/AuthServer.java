@@ -1,6 +1,7 @@
 package com.homeofcode.oauth;
 
 import com.homeofcode.https.HttpPath;
+import com.homeofcode.https.MultiPartFormDataParser;
 import com.homeofcode.https.SimpleHttpsServer;
 import com.sun.net.httpserver.HttpExchange;
 import org.json.JSONObject;
@@ -8,22 +9,17 @@ import picocli.CommandLine;
 import picocli.CommandLine.Help;
 
 import javax.net.ssl.HttpsURLConnection;
-import java.io.BufferedReader;
-import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.FileNotFoundException;
 import java.io.FileReader;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.io.OutputStream;
-import java.io.Reader;
 import java.math.BigInteger;
 import java.net.URL;
 import java.net.URLDecoder;
 import java.net.URLEncoder;
 import java.nio.charset.Charset;
-import java.nio.charset.StandardCharsets;
 import java.security.NoSuchAlgorithmException;
 import java.sql.Connection;
 import java.sql.Date;
@@ -36,12 +32,12 @@ import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.Properties;
 import java.util.Random;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Callable;
 
 import static java.lang.System.Logger.Level.INFO;
 import static java.net.HttpURLConnection.HTTP_BAD_REQUEST;
@@ -265,46 +261,6 @@ public class AuthServer {
         nonces.put(nonceRecord.nonce, nonceRecord);
         return nonceRecord;
     }
-        public void testCSRBYTE(byte[] csrFile) throws IOException{
-            String data = new String(csrFile, StandardCharsets.UTF_8);
-            System.out.println("testCSRBYTE:    " + data);
-
-    }
-    //function to read through csr file and get the csr data.
-    public byte[] parseCSRByte(byte[] csrFile) throws IOException {
-        String data = "";
-        Reader reader = new InputStreamReader( new ByteArrayInputStream(csrFile), Charset.defaultCharset());
-        BufferedReader br = new BufferedReader(reader);
-        ByteArrayOutputStream formattedCSRFileOS = new ByteArrayOutputStream();
-
-        String line = br.readLine();
-        System.out.println("Buffered Reader is reading");
-        int C = 0;
-        while(line != null) {
-            if(line.length() == 0) {
-                C = 1;
-                line = br.readLine();
-            }
-            while(C == 1) {
-                //System.out.println(line);
-                data +=line;
-                line = br.readLine();
-                //add to CSR File
-                if (line == null){
-                    C = 0;
-                }
-                if (line.length() == 0) {
-                    C = 0;
-                }
-            }
-            line = br.readLine();
-        }
-        br.close();
-        reader.close();
-        formattedCSRFileOS.close();
-        byte[] newCsrArray = data.getBytes();
-        return newCsrArray;
-    }
 
     @HttpPath(path = "/test")
     public void testPage(HttpExchange exchange) throws Exception {
@@ -318,28 +274,25 @@ public class AuthServer {
         sendOKResponse(exchange, uploadHTML.getBytes());
     }
 
+    private static byte[] fullyRead(InputStream is) throws IOException {
+        var baos = new ByteArrayOutputStream();
+        is.transferTo(baos);
+        return baos.toByteArray();
+    }
+
     @HttpPath(path = "/upload")
     public void uploadPage(HttpExchange exchange) throws Exception{
-        var dataCSR = exchange.getRequestBody();
-
-        int C;
-        ByteArrayOutputStream csrStuff = new ByteArrayOutputStream();
-        while ((C = exchange.getRequestBody().read()) != -1){
-            csrStuff.write(C);
-        }
-        csrStuff.close();
-
-        byte[] csrArray = csrStuff.toByteArray();
         //nonce
         String nonce = new BigInteger(128, rand).toString();
         var nonceRecord = new NonceRecord(nonce, Long.toHexString(rand.nextLong()), LocalDateTime.now().plus(5, ChronoUnit.MINUTES), new CompletableFuture<>());
         var authURL = createAuthURL(nonceRecord);
 
-        byte[] newCsrArray = parseCSRByte(csrArray);
-        testCSRBYTE(newCsrArray);
+        var fp = new MultiPartFormDataParser(exchange.getRequestBody());
         //putting into concurrent hashmap to feed into CertPOC
-        sendOKResponse(exchange, newCsrArray);
-        secureCSR.put(nonce, newCsrArray );
+        var ff = fp.nextField();
+        var bytes = fullyRead(ff.is);
+        sendOKResponse(exchange, bytes);
+        secureCSR.put(nonce, bytes);
     }
 
     @HttpPath(path = "/login")
@@ -444,10 +397,10 @@ public class AuthServer {
 
         static void wrapOutput(String str) {
             var line = new Help.Column(screenWidth, 0, Help.Column.Overflow.WRAP);
-            var txtTable = Help.TextTable.forColumns(Help.defaultColorScheme(Help.Ansi.AUTO), new Help.Column[] {line});
+            var txtTable = Help.TextTable.forColumns(Help.defaultColorScheme(Help.Ansi.AUTO), line);
             txtTable.indentWrappedLines = 0;
             txtTable.addRowValues(str);
-            System.out.print(txtTable.toString());
+            System.out.print(txtTable);
             System.out.flush();
         }
         static void error(String message) {
@@ -513,11 +466,11 @@ public class AuthServer {
         int serve(@CommandLine.Parameters(paramLabel = "prop_file",
                 description = "property file containing config and creds.")
                   FileReader propFile,
-                  @CommandLine.Option(names = "--port", required = false, defaultValue = "443",
+                  @CommandLine.Option(names = "--port", defaultValue = "443",
                           description = "TCP port to listen for web connections.",
                           showDefaultValue = Help.Visibility.ALWAYS)
                   int port,
-                  @CommandLine.Option(names = "--noTLS", required = false,
+                  @CommandLine.Option(names = "--noTLS",
                           description = "turn off TLS for web connections.",
                           showDefaultValue = Help.Visibility.ALWAYS)
                   boolean noTLS
