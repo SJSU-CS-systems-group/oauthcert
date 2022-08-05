@@ -1,5 +1,6 @@
 package com.homeofcode.https;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.HashMap;
@@ -29,27 +30,25 @@ public class MultiPartFormDataParser {
     }
 
     static private String readLine(InputStream is) throws IOException {
-        var sb = new StringBuilder();
+        var baos = new ByteArrayOutputStream();
         int c;
         while ((c = is.read()) != -1 && c != '\n') {
-            sb.append((char)c);
+            baos.write((byte)c);
         }
-        int len = sb.length() - 1;
-        if (sb.charAt(len) == '\r') sb.deleteCharAt(len);
-        return sb.toString();
+        var bytes = baos.toByteArray();
+        var len = bytes.length;
+        if (bytes[len-1] == (byte)'\r') len--;
+        return new String(bytes, 0, len);
     }
 
     /**
      * Return headers for next part of InputStream.
      *
      * @return map of headers or null if at end of content.
-     * @throws IOException
+     * @throws IOException if there is a problem reading the underlying stream
      */
     public FormField nextField() throws IOException {
         if (EOC) return null;
-
-        // we need to be careful how we do this since we are going pass back the InputStream and we don't want any
-        // readahead to be happening
 
         var is = dis.nextInputStream();
         if (is == null) {
@@ -60,7 +59,7 @@ public class MultiPartFormDataParser {
         FormField ff = new FormField();
         ff.is = is;
         String line;
-        while ((line = readLine(is)) != null && line.length() > 0) {
+        while ((line = readLine(is)).length() > 0) {
             if (line.equals("--")) {
                 EOC = true;
                 return null;

@@ -9,20 +9,19 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.StringBufferInputStream;
 import java.util.ArrayList;
 import java.util.Random;
 
 class DelimitedInputStreamTest {
     @Test
     public void specialCases() throws IOException {
-        var dis = new DelimitedInputStream(new StringBufferInputStream("acaabaca"), "ab".getBytes());
+        var dis = new DelimitedInputStream(new ByteArrayInputStream("acaabaca".getBytes()), "ab".getBytes());
         var str1 = fullyRead(dis.nextInputStream());
         var str2 = fullyRead(dis.nextInputStream());
         Assertions.assertEquals("aca", str1);
         Assertions.assertEquals("aca", str2);
 
-        dis = new DelimitedInputStream(new StringBufferInputStream("acaaabaaca"), "aaba".getBytes());
+        dis = new DelimitedInputStream(new ByteArrayInputStream("acaaabaaca".getBytes()), "aaba".getBytes());
         str1 = fullyRead(dis.nextInputStream());
         str2 = fullyRead(dis.nextInputStream());
         Assertions.assertEquals("aca", str1);
@@ -32,7 +31,7 @@ class DelimitedInputStreamTest {
     private static String fullyRead(InputStream is) throws IOException {
         var baos = new ByteArrayOutputStream();
         is.transferTo(baos);
-        return new String(baos.toByteArray());
+        return baos.toString();
     }
 
     @ParameterizedTest
@@ -56,16 +55,16 @@ class DelimitedInputStreamTest {
         var dastr = new String(da);
         var destr = new String(de);
         var parts = dastr.split(destr);
-        System.out.println(parts.length);
+        System.out.printf("Found %d parts\n", parts.length);
 
         DelimitedInputStream dis = new DelimitedInputStream(new ByteArrayInputStream(da), de);
         var found = new ArrayList<String>();
         while (dis.hasMore()) {
             StringBuilder sb = new StringBuilder();
-            var is = dis.nextInputStream();
-            int count = 0;
-            int c;
-            while ((c = is.read()) != -1) sb.append((char)c);
+            try (var is = dis.nextInputStream()) {
+                int c;
+                while ((c = is.read()) != -1) sb.append((char) c);
+            }
             found.add(sb.toString());
         }
 

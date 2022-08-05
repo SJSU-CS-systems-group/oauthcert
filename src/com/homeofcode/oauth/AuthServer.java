@@ -397,10 +397,10 @@ public class AuthServer {
 
         static void wrapOutput(String str) {
             var line = new Help.Column(screenWidth, 0, Help.Column.Overflow.WRAP);
-            var txtTable = Help.TextTable.forColumns(Help.defaultColorScheme(Help.Ansi.AUTO), new Help.Column[] {line});
+            var txtTable = Help.TextTable.forColumns(Help.defaultColorScheme(Help.Ansi.AUTO), line);
             txtTable.indentWrappedLines = 0;
             txtTable.addRowValues(str);
-            System.out.print(txtTable.toString());
+            System.out.print(txtTable);
             System.out.flush();
         }
         static void error(String message) {
@@ -466,11 +466,11 @@ public class AuthServer {
         int serve(@CommandLine.Parameters(paramLabel = "prop_file",
                 description = "property file containing config and creds.")
                   FileReader propFile,
-                  @CommandLine.Option(names = "--port", required = false, defaultValue = "443",
+                  @CommandLine.Option(names = "--port", defaultValue = "443",
                           description = "TCP port to listen for web connections.",
                           showDefaultValue = Help.Visibility.ALWAYS)
                   int port,
-                  @CommandLine.Option(names = "--noTLS", required = false,
+                  @CommandLine.Option(names = "--noTLS",
                           description = "turn off TLS for web connections.",
                           showDefaultValue = Help.Visibility.ALWAYS)
                   boolean noTLS
