@@ -99,7 +99,6 @@ public class AuthServer {
     public ConcurrentHashMap<String, NonceRecord> nonces = new ConcurrentHashMap<>();
     ScheduledExecutorService scheduledExecutor = Executors.newSingleThreadScheduledExecutor();
 
-    //public ConcurrentHashMap<String, byte[]> secureCSR = new ConcurrentHashMap<>();
     private Connection connection;
 
     AuthServer(Properties properties) throws IOException {
