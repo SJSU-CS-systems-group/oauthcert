@@ -51,7 +51,7 @@ public class AuthServer {
     static String errorHTML;
     static String successHTML;
     static String uploadHTML;
-
+    static byte[] faviconICO;
     // this will be filled in by setUpOutput and used by error() and info()
     static int screenWidth;
 
@@ -60,6 +60,7 @@ public class AuthServer {
             errorHTML = getResource("/pages/error.html");
             successHTML = getResource("/pages/success.html");
             uploadHTML = getResource("/pages/upload.html");
+            faviconICO = getBinaryResource("/favicon.png");
         } catch (IOException e) {
             e.printStackTrace();
             System.exit(1);
@@ -95,10 +96,10 @@ public class AuthServer {
     /**
      * the nonces that are currently being authenticated
      */
-    HashMap<String, NonceRecord> nonces = new HashMap<>();
+    public ConcurrentHashMap<String, NonceRecord> nonces = new ConcurrentHashMap<>();
     ScheduledExecutorService scheduledExecutor = Executors.newSingleThreadScheduledExecutor();
 
-    public ConcurrentHashMap<String, byte[]> secureCSR = new ConcurrentHashMap<>();
+    //public ConcurrentHashMap<String, byte[]> secureCSR = new ConcurrentHashMap<>();
     private Connection connection;
 
     AuthServer(Properties properties) throws IOException {
@@ -134,6 +135,12 @@ public class AuthServer {
         try (var stream = AuthServer.class.getResourceAsStream(path)) {
             if (stream == null) throw new FileNotFoundException(path);
             return new String(stream.readAllBytes());
+        }
+    }
+    static private byte[] getBinaryResource(String path) throws IOException {
+        try (var stream = AuthServer.class.getResourceAsStream(path)) {
+            if (stream == null) throw new FileNotFoundException(path);
+            return stream.readAllBytes();
         }
     }
 
@@ -250,22 +257,25 @@ public class AuthServer {
         }
     }
 
-    synchronized public NonceRecord createValidation() {
+    public void sendFileDownload(HttpExchange exchange, byte[] data, String fileName) throws Exception, IOException{
+        exchange.getResponseHeaders().add("Content-Disposition", "attachment; filename="  + fileName);
+        exchange.sendResponseHeaders(HTTP_OK, data.length);
+        OutputStream outputStream = exchange.getResponseBody();
+        outputStream.write(data);
+        outputStream.close();
+    }
+
+
+    synchronized public NonceRecord createValidation(byte[] csrFile) {
         var nonceRecord =
                 new NonceRecord(Long.toHexString(rand.nextLong()), Long.toHexString(rand.nextLong()),
                         LocalDateTime.now().plus(5, ChronoUnit.MINUTES),
-                        new CompletableFuture<>());
+                        new CompletableFuture<>(), csrFile);
         if (nonces.isEmpty()) {
             scheduledExecutor.schedule(this::checkExpirations, 5, TimeUnit.MINUTES);
         }
         nonces.put(nonceRecord.nonce, nonceRecord);
         return nonceRecord;
-    }
-
-    @HttpPath(path = "/test")
-    public void testPage(HttpExchange exchange) throws Exception {
-        var nr = createValidation();
-        redirect(exchange, getValidateURL(nr));
     }
 
     @HttpPath(path = "/")
@@ -279,20 +289,24 @@ public class AuthServer {
         is.transferTo(baos);
         return baos.toByteArray();
     }
-
+    @HttpPath(path = "/favicon.ico")
+    public void favIcon(HttpExchange exchange) throws Exception{
+        sendFileDownload(exchange, faviconICO, "favicon.png");
+    }
     @HttpPath(path = "/upload")
     public void uploadPage(HttpExchange exchange) throws Exception{
-        //nonce
-        String nonce = new BigInteger(128, rand).toString();
-        var nonceRecord = new NonceRecord(nonce, Long.toHexString(rand.nextLong()), LocalDateTime.now().plus(5, ChronoUnit.MINUTES), new CompletableFuture<>());
-        var authURL = createAuthURL(nonceRecord);
-
         var fp = new MultiPartFormDataParser(exchange.getRequestBody());
         //putting into concurrent hashmap to feed into CertPOC
         var ff = fp.nextField();
         var bytes = fullyRead(ff.is);
-        sendOKResponse(exchange, bytes);
-        secureCSR.put(nonce, bytes);
+
+        //nonce
+        String nonce = new BigInteger(128, rand).toString();
+        var nonceRecord = new NonceRecord(nonce, Long.toHexString(rand.nextLong()), LocalDateTime.now().plus(5,
+                ChronoUnit.MINUTES), new CompletableFuture<>(), bytes);
+        var authURL = createAuthURL(nonceRecord);
+        nonces.put(nonce, nonceRecord);
+        redirect(exchange, authURL);
     }
 
     @HttpPath(path = "/login")
@@ -340,7 +354,6 @@ public class AuthServer {
                     URLEncoder.encode(json.getString("error"), Charset.defaultCharset())));
             return;
         }
-
         // extract the email from the JWT token
         String idToken = json.getString("id_token");
         var tokenParts = idToken.split("\\.");
@@ -378,7 +391,7 @@ public class AuthServer {
     }
 
     record NonceRecord(String nonce, String state, LocalDateTime expireTime,
-                       CompletableFuture<String> future) {
+                       CompletableFuture<String> future , byte[] csr) {
         void complete(String email) {
             future.complete(email);
         }
