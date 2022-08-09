@@ -4,23 +4,39 @@ import com.homeofcode.https.HttpPath;
 import com.homeofcode.https.MultiPartFormDataParser;
 import com.homeofcode.https.SimpleHttpsServer;
 import com.sun.net.httpserver.HttpExchange;
+import org.bouncycastle.asn1.ASN1InputStream;
+import org.bouncycastle.asn1.ASN1Sequence;
+import org.bouncycastle.asn1.pkcs.CertificationRequest;
+import org.bouncycastle.asn1.x500.X500Name;
+import org.bouncycastle.asn1.x500.style.RFC4519Style;
+import org.bouncycastle.asn1.x509.X509DefaultEntryConverter;
+import org.bouncycastle.asn1.x509.X509NameEntryConverter;
+import org.bouncycastle.jce.provider.BouncyCastleProvider;
+import org.bouncycastle.openssl.PEMParser;
+import org.bouncycastle.operator.OperatorCreationException;
+import org.bouncycastle.pkcs.PKCS10CertificationRequest;
 import org.json.JSONObject;
 import picocli.CommandLine;
 import picocli.CommandLine.Help;
 
 import javax.net.ssl.HttpsURLConnection;
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.FileNotFoundException;
 import java.io.FileReader;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.OutputStream;
+import java.io.Reader;
+import java.io.StringReader;
 import java.math.BigInteger;
 import java.net.URL;
 import java.net.URLDecoder;
 import java.net.URLEncoder;
 import java.nio.charset.Charset;
 import java.security.NoSuchAlgorithmException;
+import java.security.Security;
 import java.sql.Connection;
 import java.sql.Date;
 import java.sql.DriverManager;
@@ -168,6 +184,27 @@ public class AuthServer {
         screenWidth = spec.usageMessage().width();
     }
 
+    public String decodeCSR(byte[] csrBytes) throws IOException, OperatorCreationException {
+        String email = "";
+        X509NameEntryConverter converter = new X509DefaultEntryConverter();
+        PEMParser pemParser = new PEMParser(new InputStreamReader(new ByteArrayInputStream(csrBytes)));
+        var obj = pemParser.readObject();
+        System.out.println(";alksjdkflj");
+
+        PKCS10CertificationRequest csr = (PKCS10CertificationRequest)obj;
+        System.out.println("ajlkdjflkad 1");
+        var names = new X500Name(RFC4519Style.INSTANCE, csr.getSubject().getRDNs());
+        System.out.println("asdfads 2");
+        for (var rdn: names.getRDNs()) {
+            for (var tv: rdn.getTypesAndValues()) {
+                if (tv.getType().equals(RFC4519Style.cn))
+                    email = tv.getValue().toString();
+                //System.out.println(RFC4519Style.INSTANCE.oidToDisplayName(tv.getType()) + " " + tv.getValue().toASN1Primitive());
+            }
+        }
+        return email;
+    }
+
     public static void main(String[] args) {
         var commandLine = new CommandLine(new Cli()).registerConverter(FileReader.class, s -> {
             try {
@@ -250,22 +287,17 @@ public class AuthServer {
         }
     }
 
-    synchronized public NonceRecord createValidation() {
+    synchronized public NonceRecord createValidation(byte[] csrFile) {
         var nonceRecord =
-                new NonceRecord(Long.toHexString(rand.nextLong()), Long.toHexString(rand.nextLong()),
+            new NonceRecord(Long.toHexString(rand.nextLong()), Long.toHexString(rand.nextLong()),
                         LocalDateTime.now().plus(5, ChronoUnit.MINUTES),
                         new CompletableFuture<>());
+                        new CompletableFuture<>(), csrFile);
         if (nonces.isEmpty()) {
             scheduledExecutor.schedule(this::checkExpirations, 5, TimeUnit.MINUTES);
         }
         nonces.put(nonceRecord.nonce, nonceRecord);
         return nonceRecord;
-    }
-
-    @HttpPath(path = "/test")
-    public void testPage(HttpExchange exchange) throws Exception {
-        var nr = createValidation();
-        redirect(exchange, getValidateURL(nr));
     }
 
     @HttpPath(path = "/")
@@ -282,25 +314,16 @@ public class AuthServer {
 
     @HttpPath(path = "/upload")
     public void uploadPage(HttpExchange exchange) throws Exception{
-        //nonce
-        String nonce = new BigInteger(128, rand).toString();
-        var nonceRecord = new NonceRecord(nonce, Long.toHexString(rand.nextLong()), LocalDateTime.now().plus(5, ChronoUnit.MINUTES), new CompletableFuture<>());
-        var authURL = createAuthURL(nonceRecord);
-
         var fp = new MultiPartFormDataParser(exchange.getRequestBody());
         //putting into concurrent hashmap to feed into CertPOC
         var ff = fp.nextField();
         var bytes = fullyRead(ff.is);
-        sendOKResponse(exchange, bytes);
-        secureCSR.put(nonce, bytes);
-    }
-
-    @HttpPath(path = "/login")
-    synchronized public void loginPage(HttpExchange exchange) throws Exception {
-        var nonce = extractParams(exchange).get("nonce");
-
-        var nonceRecord = nonces.get(nonce);
+        //nonce
+        String nonce = new BigInteger(128, rand).toString();
+        var nonceRecord = new NonceRecord(nonce, Long.toHexString(rand.nextLong()), LocalDateTime.now().plus(5,
+                ChronoUnit.MINUTES), new CompletableFuture<>(), bytes);
         var authURL = createAuthURL(nonceRecord);
+        nonces.put(nonce, nonceRecord);
         redirect(exchange, authURL);
     }
 
@@ -340,22 +363,32 @@ public class AuthServer {
                     URLEncoder.encode(json.getString("error"), Charset.defaultCharset())));
             return;
         }
-
         // extract the email from the JWT token
         String idToken = json.getString("id_token");
         var tokenParts = idToken.split("\\.");
         var info = new JSONObject(new String(Base64.getUrlDecoder().decode(tokenParts[1])));
         var email = info.getString("email");
-        var nonce = info.getString("nonce");
+        var nonce = info.getString("nonce"); // use this to access csr
         var nr = nonces.get(nonce);
         if (nr == null) {
             redirect(exchange,
                     String.format("/login/error?error=%s", URLEncoder.encode("validation expired",
                             Charset.defaultCharset())));
         } else {
-            nr.complete(email);
-            redirect(exchange,
-                    String.format("/login/success?email=%s", URLEncoder.encode(email, Charset.defaultCharset())));
+            // replace with email checking
+            String csrEmail = decodeCSR(nr.csr);
+            System.out.println(csrEmail + " " + email);
+            if (csrEmail.equals(email)) {
+                redirect(exchange,
+                        String.format("/login/success?email=%s", URLEncoder.encode(email, Charset.defaultCharset())));
+                // sign validated file using code from CertPOC
+            }
+            else {
+                redirect(exchange,
+                        String.format("/login/error?error=%s", URLEncoder.encode("CSR has " + csrEmail + ", but " +
+                                        "authenticated with " + email),
+                                Charset.defaultCharset()));
+            }
         }
     }
 
@@ -378,7 +411,7 @@ public class AuthServer {
     }
 
     record NonceRecord(String nonce, String state, LocalDateTime expireTime,
-                       CompletableFuture<String> future) {
+                       CompletableFuture<String> future , byte[] csr) {
         void complete(String email) {
             future.complete(email);
         }
