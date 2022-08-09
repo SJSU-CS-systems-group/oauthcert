@@ -67,7 +67,7 @@ public class AuthServer {
     static String errorHTML;
     static String successHTML;
     static String uploadHTML;
-
+    static byte[] faviconICO;
     // this will be filled in by setUpOutput and used by error() and info()
     static int screenWidth;
 
@@ -76,6 +76,7 @@ public class AuthServer {
             errorHTML = getResource("/pages/error.html");
             successHTML = getResource("/pages/success.html");
             uploadHTML = getResource("/pages/upload.html");
+            faviconICO = getBinaryResource("/favicon.png");
         } catch (IOException e) {
             e.printStackTrace();
             System.exit(1);
@@ -111,10 +112,9 @@ public class AuthServer {
     /**
      * the nonces that are currently being authenticated
      */
-    HashMap<String, NonceRecord> nonces = new HashMap<>();
+    public ConcurrentHashMap<String, NonceRecord> nonces = new ConcurrentHashMap<>();
     ScheduledExecutorService scheduledExecutor = Executors.newSingleThreadScheduledExecutor();
 
-    public ConcurrentHashMap<String, byte[]> secureCSR = new ConcurrentHashMap<>();
     private Connection connection;
 
     AuthServer(Properties properties) throws IOException {
@@ -150,6 +150,12 @@ public class AuthServer {
         try (var stream = AuthServer.class.getResourceAsStream(path)) {
             if (stream == null) throw new FileNotFoundException(path);
             return new String(stream.readAllBytes());
+        }
+    }
+    static private byte[] getBinaryResource(String path) throws IOException {
+        try (var stream = AuthServer.class.getResourceAsStream(path)) {
+            if (stream == null) throw new FileNotFoundException(path);
+            return stream.readAllBytes();
         }
     }
 
@@ -287,11 +293,18 @@ public class AuthServer {
         }
     }
 
+    public void sendFileDownload(HttpExchange exchange, byte[] data, String fileName) throws Exception, IOException{
+        exchange.getResponseHeaders().add("Content-Disposition", "attachment; filename="  + fileName);
+        exchange.sendResponseHeaders(HTTP_OK, data.length);
+        OutputStream outputStream = exchange.getResponseBody();
+        outputStream.write(data);
+        outputStream.close();
+    }
+
     synchronized public NonceRecord createValidation(byte[] csrFile) {
         var nonceRecord =
             new NonceRecord(Long.toHexString(rand.nextLong()), Long.toHexString(rand.nextLong()),
                         LocalDateTime.now().plus(5, ChronoUnit.MINUTES),
-                        new CompletableFuture<>());
                         new CompletableFuture<>(), csrFile);
         if (nonces.isEmpty()) {
             scheduledExecutor.schedule(this::checkExpirations, 5, TimeUnit.MINUTES);
@@ -311,7 +324,10 @@ public class AuthServer {
         is.transferTo(baos);
         return baos.toByteArray();
     }
-
+    @HttpPath(path = "/favicon.ico")
+    public void favIcon(HttpExchange exchange) throws Exception{
+        sendFileDownload(exchange, faviconICO, "favicon.png");
+    }
     @HttpPath(path = "/upload")
     public void uploadPage(HttpExchange exchange) throws Exception{
         var fp = new MultiPartFormDataParser(exchange.getRequestBody());
@@ -322,6 +338,16 @@ public class AuthServer {
         String nonce = new BigInteger(128, rand).toString();
         var nonceRecord = new NonceRecord(nonce, Long.toHexString(rand.nextLong()), LocalDateTime.now().plus(5,
                 ChronoUnit.MINUTES), new CompletableFuture<>(), bytes);
+        var authURL = createAuthURL(nonceRecord);
+        nonces.put(nonce, nonceRecord);
+        redirect(exchange, authURL);
+    }
+
+    @HttpPath(path = "/login")
+    synchronized public void loginPage(HttpExchange exchange) throws Exception {
+        var nonce = extractParams(exchange).get("nonce");
+
+        var nonceRecord = nonces.get(nonce);
         var authURL = createAuthURL(nonceRecord);
         nonces.put(nonce, nonceRecord);
         redirect(exchange, authURL);
