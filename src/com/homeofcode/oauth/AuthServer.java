@@ -5,15 +5,26 @@ import com.homeofcode.https.MultiPartFormDataParser;
 import com.homeofcode.https.SimpleHttpsServer;
 import com.sun.net.httpserver.HttpExchange;
 import org.bouncycastle.asn1.ASN1InputStream;
+import org.bouncycastle.asn1.ASN1Primitive;
 import org.bouncycastle.asn1.ASN1Sequence;
 import org.bouncycastle.asn1.pkcs.CertificationRequest;
+import org.bouncycastle.asn1.pkcs.PrivateKeyInfo;
+import org.bouncycastle.asn1.x500.AttributeTypeAndValue;
+import org.bouncycastle.asn1.x500.RDN;
 import org.bouncycastle.asn1.x500.X500Name;
 import org.bouncycastle.asn1.x500.style.RFC4519Style;
 import org.bouncycastle.asn1.x509.X509DefaultEntryConverter;
 import org.bouncycastle.asn1.x509.X509NameEntryConverter;
+import org.bouncycastle.cert.X509CertificateHolder;
+import org.bouncycastle.cert.X509v3CertificateBuilder;
+import org.bouncycastle.crypto.util.PrivateKeyFactory;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.bouncycastle.openssl.PEMParser;
+import org.bouncycastle.openssl.jcajce.JcaPEMWriter;
+import org.bouncycastle.operator.DefaultDigestAlgorithmIdentifierFinder;
+import org.bouncycastle.operator.DefaultSignatureAlgorithmIdentifierFinder;
 import org.bouncycastle.operator.OperatorCreationException;
+import org.bouncycastle.operator.bc.BcRSAContentSignerBuilder;
 import org.bouncycastle.pkcs.PKCS10CertificationRequest;
 import org.json.JSONObject;
 import picocli.CommandLine;
@@ -24,6 +35,7 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.FileNotFoundException;
 import java.io.FileReader;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -44,6 +56,7 @@ import java.sql.SQLException;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.Base64;
+import java.util.Calendar;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.Properties;
@@ -101,6 +114,14 @@ public class AuthServer {
      */
     String authDomain;
     /**
+     * File path to your CA private key file, read from properties file
+     */
+    String CAPrivateKey;
+    /**
+     * File path to your CA certification file, read from properties file
+     */
+    String CACert;
+    /**
      * the endpoint used to get the JWT token
      */
     String tokenEndpoint;
@@ -122,6 +143,8 @@ public class AuthServer {
         this.clientSecret = getProperty(properties, "clientSecret");
         this.authRedirectURL = getProperty(properties, "redirectURL");
         this.authDomain = getProperty(properties, "authDomain");
+        this.CAPrivateKey = getProperty(properties, "CAPrivateKey");
+        this.CACert = getProperty(properties, "CACert");
         var authDBFile = getProperty(properties, "authDBFile");
 
 
@@ -189,20 +212,59 @@ public class AuthServer {
         X509NameEntryConverter converter = new X509DefaultEntryConverter();
         PEMParser pemParser = new PEMParser(new InputStreamReader(new ByteArrayInputStream(csrBytes)));
         var obj = pemParser.readObject();
-        System.out.println(";alksjdkflj");
-
-        PKCS10CertificationRequest csr = (PKCS10CertificationRequest)obj;
-        System.out.println("ajlkdjflkad 1");
+        PKCS10CertificationRequest csr = (PKCS10CertificationRequest) obj;
+        // System.out.println("ajlkdjflkad 1");
         var names = new X500Name(RFC4519Style.INSTANCE, csr.getSubject().getRDNs());
-        System.out.println("asdfads 2");
-        for (var rdn: names.getRDNs()) {
-            for (var tv: rdn.getTypesAndValues()) {
+        for (var rdn : names.getRDNs()) {
+            for (var tv : rdn.getTypesAndValues()) {
                 if (tv.getType().equals(RFC4519Style.cn))
                     email = tv.getValue().toString();
                 //System.out.println(RFC4519Style.INSTANCE.oidToDisplayName(tv.getType()) + " " + tv.getValue().toASN1Primitive());
             }
         }
         return email;
+    }
+    public void signCSR(byte[] csrBytes) throws IOException,
+            OperatorCreationException// temporarily void until download is setup
+    {
+        var rand = new Random();
+        var now = Calendar.getInstance();
+        var expire = Calendar.getInstance();
+        expire.add(Calendar.MONTH, 4);
+        X509NameEntryConverter converter = new X509DefaultEntryConverter();
+        PEMParser pemParser = new PEMParser(new InputStreamReader(new ByteArrayInputStream(csrBytes)));
+        var obj = pemParser.readObject();
+        PKCS10CertificationRequest csr = (PKCS10CertificationRequest) obj;
+        var caParser = new PEMParser(new FileReader(CAPrivateKey));
+        var caPriv = (PrivateKeyInfo)caParser.readObject();
+        caParser = new PEMParser(new FileReader(CACert));
+        var caCert = (X509CertificateHolder)caParser.readObject();
+        var names = new X500Name(RFC4519Style.INSTANCE, csr.getSubject().getRDNs());
+        ASN1Primitive email = null;
+        for (var rdn: names.getRDNs()) {
+            for (var tv: rdn.getTypesAndValues()) {
+                if (tv.getType().equals(RFC4519Style.cn)) email = tv.getValue().toASN1Primitive();
+            }
+        }
+        var subject = new X500Name(new RDN[] {new RDN(new AttributeTypeAndValue(RFC4519Style.cn, email))});
+        // from https://stackoverflow.com/questions/7230330/sign-csr-using-bouncy-castle
+        var builder = new X509v3CertificateBuilder(
+                caCert.getIssuer(),
+                new BigInteger(128, rand),
+                now.getTime(),
+                expire.getTime(),
+                subject,
+                csr.getSubjectPublicKeyInfo()
+        );
+        var sigAlgId = new DefaultSignatureAlgorithmIdentifierFinder().find("SHA1withRSA");
+        var digAlgId = new DefaultDigestAlgorithmIdentifierFinder().find(sigAlgId);
+        var signer =
+                new BcRSAContentSignerBuilder(sigAlgId, digAlgId).build(PrivateKeyFactory.createKey(caPriv.getEncoded()));
+        var holder = builder.build(signer);
+        // replace below with file download
+        var writer = new JcaPEMWriter(new FileWriter("out.pem"));
+        writer.writeObject(holder);
+        writer.close();
     }
 
     public static void main(String[] args) {
@@ -290,9 +352,8 @@ public class AuthServer {
     synchronized public NonceRecord createValidation(byte[] csrFile) {
         var nonceRecord =
             new NonceRecord(Long.toHexString(rand.nextLong()), Long.toHexString(rand.nextLong()),
-                        LocalDateTime.now().plus(5, ChronoUnit.MINUTES),
-                        new CompletableFuture<>());
-                        new CompletableFuture<>(), csrFile);
+                    LocalDateTime.now().plus(5, ChronoUnit.MINUTES),
+                    new CompletableFuture<>(), csrFile);
         if (nonces.isEmpty()) {
             scheduledExecutor.schedule(this::checkExpirations, 5, TimeUnit.MINUTES);
         }
@@ -313,7 +374,7 @@ public class AuthServer {
     }
 
     @HttpPath(path = "/upload")
-    public void uploadPage(HttpExchange exchange) throws Exception{
+    public void uploadPage(HttpExchange exchange) throws Exception {
         var fp = new MultiPartFormDataParser(exchange.getRequestBody());
         //putting into concurrent hashmap to feed into CertPOC
         var ff = fp.nextField();
@@ -375,19 +436,14 @@ public class AuthServer {
                     String.format("/login/error?error=%s", URLEncoder.encode("validation expired",
                             Charset.defaultCharset())));
         } else {
-            // replace with email checking
             String csrEmail = decodeCSR(nr.csr);
             System.out.println(csrEmail + " " + email);
             if (csrEmail.equals(email)) {
-                redirect(exchange,
-                        String.format("/login/success?email=%s", URLEncoder.encode(email, Charset.defaultCharset())));
-                // sign validated file using code from CertPOC
+                redirect(exchange, String.format("/login/success?email=%s", URLEncoder.encode(email, Charset.defaultCharset())));
+                signCSR(nr.csr);
             }
             else {
-                redirect(exchange,
-                        String.format("/login/error?error=%s", URLEncoder.encode("CSR has " + csrEmail + ", but " +
-                                        "authenticated with " + email),
-                                Charset.defaultCharset()));
+                redirect(exchange, String.format("/login/error?error=%s", URLEncoder.encode("CSR has " + csrEmail + ", but " + "authenticated with " + email), Charset.defaultCharset()));
             }
         }
     }
@@ -411,7 +467,7 @@ public class AuthServer {
     }
 
     record NonceRecord(String nonce, String state, LocalDateTime expireTime,
-                       CompletableFuture<String> future , byte[] csr) {
+                       CompletableFuture<String> future, byte[] csr) {
         void complete(String email) {
             future.complete(email);
         }
@@ -436,6 +492,7 @@ public class AuthServer {
             System.out.print(txtTable);
             System.out.flush();
         }
+
         static void error(String message) {
             wrapOutput(Help.Ansi.AUTO.string("@|red " + message + "|@"));
         }
@@ -454,7 +511,7 @@ public class AuthServer {
                 description = "check the config file and provide guidance if needed.")
         int config(@CommandLine.Parameters(paramLabel = "prop_file",
                 description = "property file containing config and creds.")
-                   FileReader propFile) {
+                           FileReader propFile) {
             var props = new Properties();
             try {
                 props.load(propFile);
@@ -467,7 +524,7 @@ public class AuthServer {
                 } else {
                     info("clientId and clientSecret look OK.");
                 }
-                String redirectURL = (String)props.get("redirectURL");
+                String redirectURL = (String) props.get("redirectURL");
                 if (redirectURL == null) {
                     error("missing redirectURL in the config. this will be the URL to redirect the " +
                             "browser to after google has authenticated the client.");
@@ -498,15 +555,15 @@ public class AuthServer {
                 description = "start https verify endpoint.")
         int serve(@CommandLine.Parameters(paramLabel = "prop_file",
                 description = "property file containing config and creds.")
-                  FileReader propFile,
+                          FileReader propFile,
                   @CommandLine.Option(names = "--port", defaultValue = "443",
                           description = "TCP port to listen for web connections.",
                           showDefaultValue = Help.Visibility.ALWAYS)
-                  int port,
+                          int port,
                   @CommandLine.Option(names = "--noTLS",
                           description = "turn off TLS for web connections.",
                           showDefaultValue = Help.Visibility.ALWAYS)
-                  boolean noTLS
+                          boolean noTLS
         ) {
             try {
                 var props = new Properties();
