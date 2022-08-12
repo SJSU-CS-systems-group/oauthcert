@@ -178,6 +178,7 @@ public class AuthServer {
             return new String(stream.readAllBytes());
         }
     }
+
     static private byte[] getBinaryResource(String path) throws IOException {
         try (var stream = AuthServer.class.getResourceAsStream(path)) {
             if (stream == null) throw new FileNotFoundException(path);
@@ -233,6 +234,7 @@ public class AuthServer {
         }
         return email;
     }
+
     public void signCSR(byte[] csrBytes) throws IOException,
             OperatorCreationException// temporarily void until download is setup
     {
@@ -245,17 +247,17 @@ public class AuthServer {
         var obj = pemParser.readObject();
         PKCS10CertificationRequest csr = (PKCS10CertificationRequest) obj;
         var caParser = new PEMParser(new FileReader(CAPrivateKey));
-        var caPriv = (PrivateKeyInfo)caParser.readObject();
+        var caPriv = (PrivateKeyInfo) caParser.readObject();
         caParser = new PEMParser(new FileReader(CACert));
-        var caCert = (X509CertificateHolder)caParser.readObject();
+        var caCert = (X509CertificateHolder) caParser.readObject();
         var names = new X500Name(RFC4519Style.INSTANCE, csr.getSubject().getRDNs());
         ASN1Primitive email = null;
-        for (var rdn: names.getRDNs()) {
-            for (var tv: rdn.getTypesAndValues()) {
+        for (var rdn : names.getRDNs()) {
+            for (var tv : rdn.getTypesAndValues()) {
                 if (tv.getType().equals(RFC4519Style.cn)) email = tv.getValue().toASN1Primitive();
             }
         }
-        var subject = new X500Name(new RDN[] {new RDN(new AttributeTypeAndValue(RFC4519Style.cn, email))});
+        var subject = new X500Name(new RDN[]{new RDN(new AttributeTypeAndValue(RFC4519Style.cn, email))});
         // from https://stackoverflow.com/questions/7230330/sign-csr-using-bouncy-castle
         var builder = new X509v3CertificateBuilder(
                 caCert.getIssuer(),
@@ -268,7 +270,8 @@ public class AuthServer {
         var sigAlgId = new DefaultSignatureAlgorithmIdentifierFinder().find("SHA1withRSA");
         var digAlgId = new DefaultDigestAlgorithmIdentifierFinder().find(sigAlgId);
         var signer =
-                new BcRSAContentSignerBuilder(sigAlgId, digAlgId).build(PrivateKeyFactory.createKey(caPriv.getEncoded()));
+                new BcRSAContentSignerBuilder(sigAlgId, digAlgId).build(
+                        PrivateKeyFactory.createKey(caPriv.getEncoded()));
         var holder = builder.build(signer);
         // replace below with file download
         var writer = new JcaPEMWriter(new FileWriter("out.pem"));
@@ -310,8 +313,8 @@ public class AuthServer {
                 );""");
     }
 
-    void updateCertificateTable(String serialNumber, String email, int revoked, String signedCertificate,
-                                Date expDate) throws SQLException {
+    void updateCertificateTable(String serialNumber, String email, int revoked,
+                                Date expDate, String signedCertificate) throws SQLException {
         var stmt = connection.prepareStatement("""
                 replace into authRecords (
                 serialNumber,
@@ -339,7 +342,6 @@ public class AuthServer {
     }
 
     synchronized private void checkExpirations() {
-
         var toDelete = new LinkedList<String>();
         LocalDateTime now = LocalDateTime.now();
         LocalDateTime nextExpire = null;
@@ -363,18 +365,16 @@ public class AuthServer {
         }
     }
 
-    public void sendFileDownload(HttpExchange exchange, byte[] data, String fileName) throws Exception, IOException{
-        exchange.getResponseHeaders().add("Content-Disposition", "attachment; filename="  + fileName);
+    public void sendFileDownload(HttpExchange exchange, byte[] data, String fileName) throws Exception {
+        exchange.getResponseHeaders().add("Content-Disposition", "attachment; filename=" + fileName);
         exchange.sendResponseHeaders(HTTP_OK, data.length);
         OutputStream outputStream = exchange.getResponseBody();
         outputStream.write(data);
         outputStream.close();
     }
 
-
     synchronized public NonceRecord createValidation(byte[] csrFile) {
-        var nonceRecord =
-                new NonceRecord(Long.toHexString(rand.nextLong()), Long.toHexString(rand.nextLong()),
+        var nonceRecord = new NonceRecord(Long.toHexString(rand.nextLong()), Long.toHexString(rand.nextLong()),
                         LocalDateTime.now().plus(5, ChronoUnit.MINUTES),
                         new CompletableFuture<>(), csrFile);
         if (nonces.isEmpty()) {
@@ -390,35 +390,33 @@ public class AuthServer {
         sendOKResponse(exchange, uploadHTML.getBytes());
     }
 
-
-
     private static byte[] fullyRead(InputStream is) throws IOException {
         var baos = new ByteArrayOutputStream();
         is.transferTo(baos);
         return baos.toByteArray();
     }
+
     @HttpPath(path = "/favicon.ico")
-    public void favIcon(HttpExchange exchange) throws Exception{
+    public void favIcon(HttpExchange exchange) throws Exception {
         sendFileDownload(exchange, faviconICO, "favicon.png");
     }
 
     @HttpPath(path = "/style.css")
-    public void styling(HttpExchange exchange) throws Exception{
-        exchange.getResponseHeaders().add("Link", "rel=stylesheet href=style.css" );
+    public void styling(HttpExchange exchange) throws Exception {
+        exchange.getResponseHeaders().add("Link", "rel=stylesheet href=style.css");
         exchange.sendResponseHeaders(HTTP_OK, styleCSS.length());
         OutputStream outputStream = exchange.getResponseBody();
         outputStream.write(styleCSS.getBytes());
         outputStream.close();
     }
 
-
     @HttpPath(path = "/upload")
-    public void uploadPage(HttpExchange exchange) throws Exception{
+    public void uploadPage(HttpExchange exchange) throws Exception {
         var fp = new MultiPartFormDataParser(exchange.getRequestBody());
         //putting into concurrent hashmap to feed into CertPOC
         var ff = fp.nextField();
         var bytes = fullyRead(ff.is);
-        
+
         //nonce
         String nonce = new BigInteger(128, rand).toString();
         var nonceRecord = new NonceRecord(nonce, Long.toHexString(rand.nextLong()), LocalDateTime.now().plus(5,
@@ -489,11 +487,13 @@ public class AuthServer {
             String csrEmail = decodeCSR(nr.csr);
             System.out.println(csrEmail + " " + email);
             if (csrEmail.equals(email)) {
-                redirect(exchange, String.format("/login/success?email=%s", URLEncoder.encode(email, Charset.defaultCharset())));
+                redirect(exchange,
+                        String.format("/login/success?email=%s", URLEncoder.encode(email, Charset.defaultCharset())));
                 signCSR(nr.csr);
-            }
-            else {
-                redirect(exchange, String.format("/login/error?error=%s", URLEncoder.encode("CSR has " + csrEmail + ", but " + "authenticated with " + email), Charset.defaultCharset()));
+            } else {
+                redirect(exchange, String.format("/login/error?error=%s",
+                        URLEncoder.encode("CSR has " + csrEmail + ", but " + "authenticated with " + email),
+                        Charset.defaultCharset()));
             }
         }
     }
@@ -517,7 +517,7 @@ public class AuthServer {
     }
 
     record NonceRecord(String nonce, String state, LocalDateTime expireTime,
-                       CompletableFuture<String> future , byte[] csr) {
+                       CompletableFuture<String> future, byte[] csr) {
         void complete(String email) {
             future.complete(email);
         }
