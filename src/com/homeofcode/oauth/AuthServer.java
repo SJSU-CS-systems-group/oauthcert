@@ -40,6 +40,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
+import java.io.OutputStreamWriter;
 import java.io.Reader;
 import java.io.StringReader;
 import java.math.BigInteger;
@@ -230,7 +231,7 @@ public class AuthServer {
         }
         return email;
     }
-    public void signCSR(byte[] csrBytes) throws IOException,
+    public byte[] signCSR(byte[] csrBytes) throws IOException,
             OperatorCreationException// temporarily void until download is setup
     {
         var rand = new Random();
@@ -267,10 +268,11 @@ public class AuthServer {
         var signer =
                 new BcRSAContentSignerBuilder(sigAlgId, digAlgId).build(PrivateKeyFactory.createKey(caPriv.getEncoded()));
         var holder = builder.build(signer);
-        // replace below with file download
-        var writer = new JcaPEMWriter(new FileWriter("out.pem"));
+        var baos = new ByteArrayOutputStream();
+        var writer = new JcaPEMWriter(new OutputStreamWriter(baos));
         writer.writeObject(holder);
         writer.close();
+        return baos.toByteArray();
     }
 
     public static void main(String[] args) {
@@ -408,7 +410,6 @@ public class AuthServer {
     @HttpPath(path = "/login")
     synchronized public void loginPage(HttpExchange exchange) throws Exception {
         var nonce = extractParams(exchange).get("nonce");
-
         var nonceRecord = nonces.get(nonce);
         var authURL = createAuthURL(nonceRecord);
         nonces.put(nonce, nonceRecord);
@@ -465,9 +466,10 @@ public class AuthServer {
         } else {
             String csrEmail = decodeCSR(nr.csr);
             System.out.println(csrEmail + " " + email);
-            if (csrEmail.equals(email)) {
-                redirect(exchange, String.format("/login/success?email=%s", URLEncoder.encode(email, Charset.defaultCharset())));
-                signCSR(nr.csr);
+            if (csrEmail.equals(email)) { // just send email for database access
+                // sign and add to database, but make sure all other certificates are revoked
+                redirect(exchange, String.format("/login/success?email=%s", URLEncoder.encode(email,
+                        Charset.defaultCharset())));
             }
             else {
                 redirect(exchange, String.format("/login/error?error=%s", URLEncoder.encode("CSR has " + csrEmail + ", but " + "authenticated with " + email), Charset.defaultCharset()));
@@ -484,9 +486,21 @@ public class AuthServer {
 
     @HttpPath(path = "/login/success")
     public void loginSuccess(HttpExchange exchange) throws Exception {
+        HashMap<String, String> params = extractParams(exchange);
+        var email = params.get("email");
+        redirect(exchange, String.format("/login/success/download?email=%s", URLEncoder.encode(email,
+                Charset.defaultCharset())));
+    }
+
+    @HttpPath(path = "/login/success/download")
+    public void downloadSigned(HttpExchange exchange) throws Exception {
         var email = extractParams(exchange).get("email");
         byte[] response = successHTML.replace("EMAIL", email).getBytes();
         sendOKResponse(exchange, response);
+        var nonce = extractParams(exchange).get("nonce");
+        var nr = nonces.get(nonce);
+        //replace sign call with database query using email
+        sendFileDownload(exchange, signCSR(nr.csr), "signed.csr");
     }
 
     String getValidateURL(NonceRecord nr) {
