@@ -81,6 +81,8 @@ public class AuthServer {
     static String successHTML;
     static String uploadHTML;
     static byte[] faviconICO;
+    static String styleCSS;
+
     // this will be filled in by setUpOutput and used by error() and info()
     static int screenWidth;
 
@@ -90,6 +92,7 @@ public class AuthServer {
             successHTML = getResource("/pages/success.html");
             uploadHTML = getResource("/pages/upload.html");
             faviconICO = getBinaryResource("/favicon.png");
+            styleCSS = getResource("/style.css");
         } catch (IOException e) {
             e.printStackTrace();
             System.exit(1);
@@ -162,7 +165,7 @@ public class AuthServer {
 
         try {
             this.connection = DriverManager.getConnection(authDBFile);
-            checkAuthTable();
+            certificateTable();
         } catch (SQLException e) {
             System.out.println("problem accessing database: " + e.getMessage());
             System.exit(3);
@@ -175,6 +178,7 @@ public class AuthServer {
             return new String(stream.readAllBytes());
         }
     }
+
     static private byte[] getBinaryResource(String path) throws IOException {
         try (var stream = AuthServer.class.getResourceAsStream(path)) {
             if (stream == null) throw new FileNotFoundException(path);
@@ -230,6 +234,7 @@ public class AuthServer {
         }
         return email;
     }
+
     public void signCSR(byte[] csrBytes) throws IOException,
             OperatorCreationException// temporarily void until download is setup
     {
@@ -242,17 +247,17 @@ public class AuthServer {
         var obj = pemParser.readObject();
         PKCS10CertificationRequest csr = (PKCS10CertificationRequest) obj;
         var caParser = new PEMParser(new FileReader(CAPrivateKey));
-        var caPriv = (PrivateKeyInfo)caParser.readObject();
+        var caPriv = (PrivateKeyInfo) caParser.readObject();
         caParser = new PEMParser(new FileReader(CACert));
-        var caCert = (X509CertificateHolder)caParser.readObject();
+        var caCert = (X509CertificateHolder) caParser.readObject();
         var names = new X500Name(RFC4519Style.INSTANCE, csr.getSubject().getRDNs());
         ASN1Primitive email = null;
-        for (var rdn: names.getRDNs()) {
-            for (var tv: rdn.getTypesAndValues()) {
+        for (var rdn : names.getRDNs()) {
+            for (var tv : rdn.getTypesAndValues()) {
                 if (tv.getType().equals(RFC4519Style.cn)) email = tv.getValue().toASN1Primitive();
             }
         }
-        var subject = new X500Name(new RDN[] {new RDN(new AttributeTypeAndValue(RFC4519Style.cn, email))});
+        var subject = new X500Name(new RDN[]{new RDN(new AttributeTypeAndValue(RFC4519Style.cn, email))});
         // from https://stackoverflow.com/questions/7230330/sign-csr-using-bouncy-castle
         var builder = new X509v3CertificateBuilder(
                 caCert.getIssuer(),
@@ -265,7 +270,8 @@ public class AuthServer {
         var sigAlgId = new DefaultSignatureAlgorithmIdentifierFinder().find("SHA1withRSA");
         var digAlgId = new DefaultDigestAlgorithmIdentifierFinder().find(sigAlgId);
         var signer =
-                new BcRSAContentSignerBuilder(sigAlgId, digAlgId).build(PrivateKeyFactory.createKey(caPriv.getEncoded()));
+                new BcRSAContentSignerBuilder(sigAlgId, digAlgId).build(
+                        PrivateKeyFactory.createKey(caPriv.getEncoded()));
         var holder = builder.build(signer);
         // replace below with file download
         var writer = new JcaPEMWriter(new FileWriter("out.pem"));
@@ -295,29 +301,33 @@ public class AuthServer {
         return value;
     }
 
-    void checkAuthTable() throws SQLException {
+    void certificateTable() throws SQLException {
         var stmt = connection.createStatement();
         stmt.execute("""
-                create table if not exists authRecords (
-                discordSnowflake text primary key,
-                discordId text,
+                create table if not exists certificate (
+                serialNumber text primary key,
                 email text,
-                verifyDate date
+                revoked int,
+                expirationDate date,
+                signedCertificate text
                 );""");
     }
 
-    void updateAuthRecord(String discordSnowflake, String discordId, String email, Date date) throws SQLException {
+    void updateCertificateTable(String serialNumber, String email, int revoked,
+                                Date expDate, String signedCertificate) throws SQLException {
         var stmt = connection.prepareStatement("""
                 replace into authRecords (
-                discordSnowflake,
-                discordId,
+                serialNumber,
                 email,
-                verifyDate
+                revoked,
+                expirationDate,
+                signedCertificate
                 ) values (?,?,?,?);""");
-        stmt.setString(1, discordSnowflake);
-        stmt.setString(2, discordId);
-        stmt.setString(3, email);
-        stmt.setDate(4, date);
+        stmt.setString(1, serialNumber);
+        stmt.setString(2, email);
+        stmt.setInt(3, revoked);
+        stmt.setDate(4, expDate);
+        stmt.setString(5, signedCertificate);
         stmt.execute();
     }
 
@@ -355,8 +365,8 @@ public class AuthServer {
         }
     }
 
-    public void sendFileDownload(HttpExchange exchange, byte[] data, String fileName) throws Exception, IOException{
-        exchange.getResponseHeaders().add("Content-Disposition", "attachment; filename="  + fileName);
+    public void sendFileDownload(HttpExchange exchange, byte[] data, String fileName) throws Exception {
+        exchange.getResponseHeaders().add("Content-Disposition", "attachment; filename=" + fileName);
         exchange.sendResponseHeaders(HTTP_OK, data.length);
         OutputStream outputStream = exchange.getResponseBody();
         outputStream.write(data);
@@ -364,10 +374,9 @@ public class AuthServer {
     }
 
     synchronized public NonceRecord createValidation(byte[] csrFile) {
-        var nonceRecord =
-            new NonceRecord(Long.toHexString(rand.nextLong()), Long.toHexString(rand.nextLong()),
-                    LocalDateTime.now().plus(5, ChronoUnit.MINUTES),
-                    new CompletableFuture<>(), csrFile);
+        var nonceRecord = new NonceRecord(Long.toHexString(rand.nextLong()), Long.toHexString(rand.nextLong()),
+                        LocalDateTime.now().plus(5, ChronoUnit.MINUTES),
+                        new CompletableFuture<>(), csrFile);
         if (nonces.isEmpty()) {
             scheduledExecutor.schedule(this::checkExpirations, 5, TimeUnit.MINUTES);
         }
@@ -386,16 +395,28 @@ public class AuthServer {
         is.transferTo(baos);
         return baos.toByteArray();
     }
+
     @HttpPath(path = "/favicon.ico")
-    public void favIcon(HttpExchange exchange) throws Exception{
+    public void favIcon(HttpExchange exchange) throws Exception {
         sendFileDownload(exchange, faviconICO, "favicon.png");
     }
+
+    @HttpPath(path = "/style.css")
+    public void styling(HttpExchange exchange) throws Exception {
+        exchange.getResponseHeaders().add("Link", "rel=stylesheet href=style.css");
+        exchange.sendResponseHeaders(HTTP_OK, styleCSS.length());
+        OutputStream outputStream = exchange.getResponseBody();
+        outputStream.write(styleCSS.getBytes());
+        outputStream.close();
+    }
+
     @HttpPath(path = "/upload")
     public void uploadPage(HttpExchange exchange) throws Exception {
         var fp = new MultiPartFormDataParser(exchange.getRequestBody());
         //putting into concurrent hashmap to feed into CertPOC
         var ff = fp.nextField();
         var bytes = fullyRead(ff.is);
+
         //nonce
         String nonce = new BigInteger(128, rand).toString();
         var nonceRecord = new NonceRecord(nonce, Long.toHexString(rand.nextLong()), LocalDateTime.now().plus(5,
@@ -466,11 +487,13 @@ public class AuthServer {
             String csrEmail = decodeCSR(nr.csr);
             System.out.println(csrEmail + " " + email);
             if (csrEmail.equals(email)) {
-                redirect(exchange, String.format("/login/success?email=%s", URLEncoder.encode(email, Charset.defaultCharset())));
+                redirect(exchange,
+                        String.format("/login/success?email=%s", URLEncoder.encode(email, Charset.defaultCharset())));
                 signCSR(nr.csr);
-            }
-            else {
-                redirect(exchange, String.format("/login/error?error=%s", URLEncoder.encode("CSR has " + csrEmail + ", but " + "authenticated with " + email), Charset.defaultCharset()));
+            } else {
+                redirect(exchange, String.format("/login/error?error=%s",
+                        URLEncoder.encode("CSR has " + csrEmail + ", but " + "authenticated with " + email),
+                        Charset.defaultCharset()));
             }
         }
     }

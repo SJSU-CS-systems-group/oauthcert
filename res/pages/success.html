@@ -1,9 +1,28 @@
 <html>
+
 <head>
-    <title>Discord Oauth Success!</title>
+    <link rel="stylesheet" href="/style.css" />
+    <title>AuthServer Success</title>
 </head>
+
 <body>
-<h1>yay!</h1>
-you have successfully authenticated as: <font color="green">EMAIL</font>
+    <nav class="navbar">
+        <!-- logo -->
+        <div class="logo">SJSU AuthServer</div>
+    </nav>
+    <br>
+
+    <div class="alert2">
+        <strong>You were authenticated!</strong>
+        <h2>you have successfully authenticated as: EMAIL</h2>
+    </div>
+
+    <br>
+    <div style="text-align:center">
+        <form>
+            <button class="downld-btn" formaction="/login/success/download?email=EMAIL">Download CSR</button>
+        </form>
+    </div>
 </body>
+
 </html>
