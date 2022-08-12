@@ -52,6 +52,7 @@ public class AuthServer {
     static String successHTML;
     static String uploadHTML;
     static byte[] faviconICO;
+    static String styleCSS;
     // this will be filled in by setUpOutput and used by error() and info()
     static int screenWidth;
 
@@ -61,6 +62,7 @@ public class AuthServer {
             successHTML = getResource("/pages/success.html");
             uploadHTML = getResource("/pages/upload.html");
             faviconICO = getBinaryResource("/favicon.png");
+            styleCSS = getResource("/style.css");
         } catch (IOException e) {
             e.printStackTrace();
             System.exit(1);
@@ -123,7 +125,7 @@ public class AuthServer {
 
         try {
             this.connection = DriverManager.getConnection(authDBFile);
-            checkAuthTable();
+            certificateTable();
         } catch (SQLException e) {
             System.out.println("problem accessing database: " + e.getMessage());
             System.exit(3);
@@ -196,29 +198,33 @@ public class AuthServer {
         return value;
     }
 
-    void checkAuthTable() throws SQLException {
+    void certificateTable() throws SQLException {
         var stmt = connection.createStatement();
         stmt.execute("""
-                create table if not exists authRecords (
-                discordSnowflake text primary key,
-                discordId text,
+                create table if not exists certificate (
+                serialNumber text primary key,
                 email text,
-                verifyDate date
+                revoked int,
+                expirationDate date,
+                signedCertificate text
                 );""");
     }
 
-    void updateAuthRecord(String discordSnowflake, String discordId, String email, Date date) throws SQLException {
+    void updateCertificateTable(String serialNumber, String email, int revoked, String signedCertificate,
+                                Date expDate) throws SQLException {
         var stmt = connection.prepareStatement("""
                 replace into authRecords (
-                discordSnowflake,
-                discordId,
+                serialNumber,
                 email,
-                verifyDate
+                revoked,
+                expirationDate,
+                signedCertificate
                 ) values (?,?,?,?);""");
-        stmt.setString(1, discordSnowflake);
-        stmt.setString(2, discordId);
-        stmt.setString(3, email);
-        stmt.setDate(4, date);
+        stmt.setString(1, serialNumber);
+        stmt.setString(2, email);
+        stmt.setInt(3, revoked);
+        stmt.setDate(4, expDate);
+        stmt.setString(5, signedCertificate);
         stmt.execute();
     }
 
@@ -233,6 +239,7 @@ public class AuthServer {
     }
 
     synchronized private void checkExpirations() {
+
         var toDelete = new LinkedList<String>();
         LocalDateTime now = LocalDateTime.now();
         LocalDateTime nextExpire = null;
@@ -283,6 +290,8 @@ public class AuthServer {
         sendOKResponse(exchange, uploadHTML.getBytes());
     }
 
+
+
     private static byte[] fullyRead(InputStream is) throws IOException {
         var baos = new ByteArrayOutputStream();
         is.transferTo(baos);
@@ -292,6 +301,17 @@ public class AuthServer {
     public void favIcon(HttpExchange exchange) throws Exception{
         sendFileDownload(exchange, faviconICO, "favicon.png");
     }
+
+    @HttpPath(path = "/style.css")
+    public void styling(HttpExchange exchange) throws Exception{
+        exchange.getResponseHeaders().add("Link", "rel=stylesheet href=style.css" );
+        exchange.sendResponseHeaders(HTTP_OK, styleCSS.length());
+        OutputStream outputStream = exchange.getResponseBody();
+        outputStream.write(styleCSS.getBytes());
+        outputStream.close();
+    }
+
+
     @HttpPath(path = "/upload")
     public void uploadPage(HttpExchange exchange) throws Exception{
         var fp = new MultiPartFormDataParser(exchange.getRequestBody());

@@ -1,0 +1,139 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-weight: 400;
+    font-size: medium;
+}
+
+.navbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 25px;
+    background-color: rgb(25, 94, 255);
+    color: white;
+    font-family: Helvetica, sans-serif;
+    font-weight: 900;
+    font-size: large;
+}
+
+.alert {
+    margin: auto;
+    padding: 20px;
+    color: black;
+    background-color: aliceblue;
+    border: 2px;
+    border-style: dashed;
+    margin-bottom: 15px;
+    width: fit-content;
+    height: fit-content;
+    text-align: center;
+    white-space: nowrap;
+    font-family: Helvetica, sans-serif;
+}
+
+.alert1 {
+    margin: auto;
+    padding: 20px;
+    color: whitesmoke;
+    background-color: red;
+    border: 2px;
+    margin-bottom: 15px;
+    width: fit-content;
+    height: fit-content;
+    text-align: center;
+    border-radius: 20px;
+    font-family: Helvetica, sans-serif;
+}
+
+.alert2 {
+    margin: auto;
+    padding: 20px;
+    color: whitesmoke;
+    background-color: #4BB543;
+    border: 2px;
+    margin-bottom: 15px;
+    width: fit-content;
+    height: fit-content;
+    text-align: center;
+    border-radius: 20px;
+    font-family: Helvetica, sans-serif;
+}
+
+.upload-btn {
+    position: sticky;
+    display: block;
+}
+
+.customlabel {
+    border: 1px solid #ccc;
+    display: inline-block;
+    padding: 6px 12px;
+    cursor: pointer;
+}
+
+.sub-btn {
+    background-color: rgb(56, 111, 238);
+    border-radius: 10px;
+    border: 1px solid #ffffff;
+    display: inline-block;
+    cursor: pointer;
+    color: #ffffff;
+    font-family: Helvetica, sans-serif;
+    font-size: 17px;
+    padding: 16px 31px;
+    text-decoration: none;
+}
+
+.sub-btn:hover {
+    background-color: rgb(25, 94, 255);
+}
+
+.sub-btn:active {
+    position: relative;
+    top: 1px;
+}
+
+.upload-btn {
+    background-color: rgb(56, 111, 238);
+    border-radius: 10px;
+    border: 1px solid #ffffff;
+    display: inline-block;
+    cursor: pointer;
+    color: #ffffff;
+    font-family: Helvetica, sans-serif;
+    font-size: 17px;
+    padding: 16px 31px;
+}
+
+.downld-btn {
+    background-color: #4BB543;
+    border-radius: 28px;
+    border: 1px solid #18ab29;
+    display: inline-block;
+    cursor: pointer;
+    color: #ffffff;
+    font-family: Helvetica, sans-serif;
+    font-size: 17px;
+    padding: 16px 31px;
+    text-shadow: 0px 1px 0px #2f6627;
+}
+
+.downld-btn:hover {
+    background-color: #5cbf2a;
+}
+
+.downld-btn:active {
+    position: relative;
+    top: 1px;
+}
+
+input[type=file] {
+    min-width: 14rem;
+    filter: alpha(opacity=0);
+    font-family: Helvetica, sans-serif;
+}
