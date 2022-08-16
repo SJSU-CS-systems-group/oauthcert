@@ -4,21 +4,15 @@ import com.homeofcode.https.HttpPath;
 import com.homeofcode.https.MultiPartFormDataParser;
 import com.homeofcode.https.SimpleHttpsServer;
 import com.sun.net.httpserver.HttpExchange;
-import org.bouncycastle.asn1.ASN1InputStream;
 import org.bouncycastle.asn1.ASN1Primitive;
-import org.bouncycastle.asn1.ASN1Sequence;
-import org.bouncycastle.asn1.pkcs.CertificationRequest;
 import org.bouncycastle.asn1.pkcs.PrivateKeyInfo;
 import org.bouncycastle.asn1.x500.AttributeTypeAndValue;
 import org.bouncycastle.asn1.x500.RDN;
 import org.bouncycastle.asn1.x500.X500Name;
 import org.bouncycastle.asn1.x500.style.RFC4519Style;
-import org.bouncycastle.asn1.x509.X509DefaultEntryConverter;
-import org.bouncycastle.asn1.x509.X509NameEntryConverter;
 import org.bouncycastle.cert.X509CertificateHolder;
 import org.bouncycastle.cert.X509v3CertificateBuilder;
 import org.bouncycastle.crypto.util.PrivateKeyFactory;
-import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.bouncycastle.openssl.PEMParser;
 import org.bouncycastle.openssl.jcajce.JcaPEMWriter;
 import org.bouncycastle.operator.DefaultDigestAlgorithmIdentifierFinder;
@@ -35,24 +29,23 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.FileNotFoundException;
 import java.io.FileReader;
-import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
-import java.io.Reader;
-import java.io.StringReader;
+import java.io.OutputStreamWriter;
 import java.math.BigInteger;
 import java.net.URL;
 import java.net.URLDecoder;
 import java.net.URLEncoder;
 import java.nio.charset.Charset;
 import java.security.NoSuchAlgorithmException;
-import java.security.Security;
 import java.sql.Connection;
 import java.sql.Date;
 import java.sql.DriverManager;
+import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.Base64;
@@ -74,15 +67,13 @@ import static java.net.HttpURLConnection.HTTP_MOVED_TEMP;
 import static java.net.HttpURLConnection.HTTP_OK;
 
 public class AuthServer {
-    final static String OPEN_ID_ENDPT = "https://accounts.google.com/.well-known/openid-configuration";
     public static final String LOGIN_CALLBACK = "/login/callback";
+    final static String OPEN_ID_ENDPT = "https://accounts.google.com/.well-known/openid-configuration";
     static System.Logger LOG = System.getLogger(AuthServer.class.getPackageName());
     static String errorHTML;
     static String successHTML;
     static String uploadHTML;
     static byte[] faviconICO;
-    static String styleCSS;
-
     // this will be filled in by setUpOutput and used by error() and info()
     static int screenWidth;
 
@@ -92,13 +83,16 @@ public class AuthServer {
             successHTML = getResource("/pages/success.html");
             uploadHTML = getResource("/pages/upload.html");
             faviconICO = getBinaryResource("/favicon.png");
-            styleCSS = getResource("/style.css");
         } catch (IOException e) {
             e.printStackTrace();
             System.exit(1);
         }
     }
 
+    /**
+     * the nonces that are currently being authenticated
+     */
+    public ConcurrentHashMap<String, NonceRecord> nonces = new ConcurrentHashMap<>();
     Random rand = new Random();
     /**
      * the client_id used to talk to google services
@@ -133,10 +127,6 @@ public class AuthServer {
      * the endpoint used to start oauth
      */
     String authEndpoint;
-    /**
-     * the nonces that are currently being authenticated
-     */
-    public ConcurrentHashMap<String, NonceRecord> nonces = new ConcurrentHashMap<>();
     ScheduledExecutorService scheduledExecutor = Executors.newSingleThreadScheduledExecutor();
 
     private Connection connection;
@@ -217,32 +207,56 @@ public class AuthServer {
         screenWidth = spec.usageMessage().width();
     }
 
-    public String decodeCSR(byte[] csrBytes) throws IOException, OperatorCreationException {
+    public static void main(String[] args) {
+        var commandLine = new CommandLine(new Cli()).registerConverter(FileReader.class, s -> {
+            try {
+                return new FileReader(s);
+            } catch (Exception e) {
+                throw new CommandLine.TypeConversionException(e.getMessage());
+            }
+        });
+        setupOutput(commandLine);
+        int exitCode = commandLine.execute(args);
+        System.exit(exitCode);
+    }
+
+    private static String getProperty(Properties properties, String key) {
+        var value = properties.getProperty(key);
+        if (value == null) {
+            System.out.printf("%s property missing from property file\n", key);
+            System.exit(1);
+        }
+        return value;
+    }
+
+    private static byte[] fullyRead(InputStream is) throws IOException {
+        var baos = new ByteArrayOutputStream();
+        is.transferTo(baos);
+        return baos.toByteArray();
+    }
+
+    public String decodeCSR(byte[] csrBytes) throws IOException {
         String email = "";
-        X509NameEntryConverter converter = new X509DefaultEntryConverter();
         PEMParser pemParser = new PEMParser(new InputStreamReader(new ByteArrayInputStream(csrBytes)));
         var obj = pemParser.readObject();
         PKCS10CertificationRequest csr = (PKCS10CertificationRequest) obj;
-        // System.out.println("ajlkdjflkad 1");
         var names = new X500Name(RFC4519Style.INSTANCE, csr.getSubject().getRDNs());
         for (var rdn : names.getRDNs()) {
             for (var tv : rdn.getTypesAndValues()) {
                 if (tv.getType().equals(RFC4519Style.cn))
                     email = tv.getValue().toString();
-                //System.out.println(RFC4519Style.INSTANCE.oidToDisplayName(tv.getType()) + " " + tv.getValue().toASN1Primitive());
             }
         }
         return email;
     }
 
-    public void signCSR(byte[] csrBytes) throws IOException,
+    public byte[] signCSR(byte[] csrBytes) throws IOException,
             OperatorCreationException// temporarily void until download is setup
     {
         var rand = new Random();
         var now = Calendar.getInstance();
         var expire = Calendar.getInstance();
         expire.add(Calendar.MONTH, 4);
-        X509NameEntryConverter converter = new X509DefaultEntryConverter();
         PEMParser pemParser = new PEMParser(new InputStreamReader(new ByteArrayInputStream(csrBytes)));
         var obj = pemParser.readObject();
         PKCS10CertificationRequest csr = (PKCS10CertificationRequest) obj;
@@ -273,38 +287,17 @@ public class AuthServer {
                 new BcRSAContentSignerBuilder(sigAlgId, digAlgId).build(
                         PrivateKeyFactory.createKey(caPriv.getEncoded()));
         var holder = builder.build(signer);
-        // replace below with file download
-        var writer = new JcaPEMWriter(new FileWriter("out.pem"));
+        var baos = new ByteArrayOutputStream();
+        var writer = new JcaPEMWriter(new OutputStreamWriter(baos));
         writer.writeObject(holder);
         writer.close();
-    }
-
-    public static void main(String[] args) {
-        var commandLine = new CommandLine(new Cli()).registerConverter(FileReader.class, s -> {
-            try {
-                return new FileReader(s);
-            } catch (Exception e) {
-                throw new CommandLine.TypeConversionException(e.getMessage());
-            }
-        });
-        setupOutput(commandLine);
-        int exitCode = commandLine.execute(args);
-        System.exit(exitCode);
-    }
-
-    private static String getProperty(Properties properties, String key) {
-        var value = properties.getProperty(key);
-        if (value == null) {
-            System.out.printf("%s property missing from property file\n", key);
-            System.exit(1);
-        }
-        return value;
+        return baos.toByteArray();
     }
 
     void certificateTable() throws SQLException {
         var stmt = connection.createStatement();
         stmt.execute("""
-                create table if not exists certificate (
+                create table if not exists certificates (
                 serialNumber text primary key,
                 email text,
                 revoked int,
@@ -316,13 +309,13 @@ public class AuthServer {
     void updateCertificateTable(String serialNumber, String email, int revoked,
                                 Date expDate, String signedCertificate) throws SQLException {
         var stmt = connection.prepareStatement("""
-                replace into authRecords (
+                replace into certificates (
                 serialNumber,
                 email,
                 revoked,
                 expirationDate,
                 signedCertificate
-                ) values (?,?,?,?);""");
+                ) values (?,?,?,?,?);""");
         stmt.setString(1, serialNumber);
         stmt.setString(2, email);
         stmt.setInt(3, revoked);
@@ -374,7 +367,8 @@ public class AuthServer {
     }
 
     synchronized public NonceRecord createValidation(byte[] csrFile) {
-        var nonceRecord = new NonceRecord(Long.toHexString(rand.nextLong()), Long.toHexString(rand.nextLong()),
+        var nonceRecord =
+                new NonceRecord(Long.toHexString(rand.nextLong()), Long.toHexString(rand.nextLong()),
                         LocalDateTime.now().plus(5, ChronoUnit.MINUTES),
                         new CompletableFuture<>(), csrFile);
         if (nonces.isEmpty()) {
@@ -386,28 +380,12 @@ public class AuthServer {
 
     @HttpPath(path = "/")
     public void rootPage(HttpExchange exchange) throws Exception {
-        System.out.println("Reached upload page");
         sendOKResponse(exchange, uploadHTML.getBytes());
-    }
-
-    private static byte[] fullyRead(InputStream is) throws IOException {
-        var baos = new ByteArrayOutputStream();
-        is.transferTo(baos);
-        return baos.toByteArray();
     }
 
     @HttpPath(path = "/favicon.ico")
     public void favIcon(HttpExchange exchange) throws Exception {
         sendFileDownload(exchange, faviconICO, "favicon.png");
-    }
-
-    @HttpPath(path = "/style.css")
-    public void styling(HttpExchange exchange) throws Exception {
-        exchange.getResponseHeaders().add("Link", "rel=stylesheet href=style.css");
-        exchange.sendResponseHeaders(HTTP_OK, styleCSS.length());
-        OutputStream outputStream = exchange.getResponseBody();
-        outputStream.write(styleCSS.getBytes());
-        outputStream.close();
     }
 
     @HttpPath(path = "/upload")
@@ -416,7 +394,6 @@ public class AuthServer {
         //putting into concurrent hashmap to feed into CertPOC
         var ff = fp.nextField();
         var bytes = fullyRead(ff.is);
-
         //nonce
         String nonce = new BigInteger(128, rand).toString();
         var nonceRecord = new NonceRecord(nonce, Long.toHexString(rand.nextLong()), LocalDateTime.now().plus(5,
@@ -429,7 +406,6 @@ public class AuthServer {
     @HttpPath(path = "/login")
     synchronized public void loginPage(HttpExchange exchange) throws Exception {
         var nonce = extractParams(exchange).get("nonce");
-
         var nonceRecord = nonces.get(nonce);
         var authURL = createAuthURL(nonceRecord);
         nonces.put(nonce, nonceRecord);
@@ -485,15 +461,17 @@ public class AuthServer {
                             Charset.defaultCharset())));
         } else {
             String csrEmail = decodeCSR(nr.csr);
-            System.out.println(csrEmail + " " + email);
-            if (csrEmail.equals(email)) {
-                redirect(exchange,
-                        String.format("/login/success?email=%s", URLEncoder.encode(email, Charset.defaultCharset())));
-                signCSR(nr.csr);
+            if (csrEmail.equals(email)) { // just send email for database access
+                // sign and add to database, but make sure all other certificates are revoked
+                Date expire = new Date(System.currentTimeMillis());
+                expire.setMonth(expire.getMonth() + 4);
+                updateCertificateTable(nonce, email, 0, expire, new String(signCSR(nr.csr)));
+                redirect(exchange, String.format("/login/success?email=%s", URLEncoder.encode(email,
+                        Charset.defaultCharset())));
             } else {
                 redirect(exchange, String.format("/login/error?error=%s",
-                        URLEncoder.encode("CSR has " + csrEmail + ", but " + "authenticated with " + email),
-                        Charset.defaultCharset()));
+                        URLEncoder.encode("CSR has " + csrEmail + ", but " + "authenticated with " + email,
+                                Charset.defaultCharset())));
             }
         }
     }
@@ -510,6 +488,35 @@ public class AuthServer {
         var email = extractParams(exchange).get("email");
         byte[] response = successHTML.replace("EMAIL", email).getBytes();
         sendOKResponse(exchange, response);
+    }
+
+    @HttpPath(path = "/login/success/download")
+    public void downloadSigned(HttpExchange exchange) throws Exception {
+        var email = extractParams(exchange).get("email");
+        String getSigned = null;
+        //String query = "select signedCertificate from certificates where revoked = False and email = ?;";
+        try (Statement stmt = connection.createStatement()) {
+            boolean rc = stmt.execute(String.format("select signedCertificate from certificates where revoked = False" +
+                    " and email = \"%s\";", email));
+            if (rc) {
+                ResultSet rs = stmt.getResultSet();
+                if (rs.next()) {
+                    getSigned = rs.getString("signedCertificate");
+                }
+                if (rs.next()) {
+                    Cli.error("Duplicate signed certificates for " + email + ".");
+                }
+            }
+        } catch (SQLException e) {
+            Cli.error("problem getting certificate from email: " + email + " " + e);
+        }
+        if (getSigned != null) {
+            sendFileDownload(exchange, getSigned.getBytes(), "signed.csr");
+        } else {
+            redirect(exchange, String.format("/login/error?error=%s",
+                    URLEncoder.encode("Could not find signed certificate for " + email,
+                            Charset.defaultCharset())));
+        }
     }
 
     String getValidateURL(NonceRecord nr) {
