@@ -74,6 +74,8 @@ public class AuthServer {
     static String successHTML;
     static String uploadHTML;
     static byte[] faviconICO;
+    static String styleCSS;
+
     // this will be filled in by setUpOutput and used by error() and info()
     static int screenWidth;
 
@@ -83,6 +85,7 @@ public class AuthServer {
             successHTML = getResource("/pages/success.html");
             uploadHTML = getResource("/pages/upload.html");
             faviconICO = getBinaryResource("/favicon.png");
+            styleCSS = getResource("/style.css");
         } catch (IOException e) {
             e.printStackTrace();
             System.exit(1);
@@ -297,7 +300,7 @@ public class AuthServer {
     void certificateTable() throws SQLException {
         var stmt = connection.createStatement();
         stmt.execute("""
-                create table if not exists certificates (
+                create table if not exists certificate (
                 serialNumber text primary key,
                 email text,
                 revoked int,
@@ -309,7 +312,7 @@ public class AuthServer {
     void updateCertificateTable(String serialNumber, String email, int revoked,
                                 Date expDate, String signedCertificate) throws SQLException {
         var stmt = connection.prepareStatement("""
-                replace into certificates (
+                replace into certificate (
                 serialNumber,
                 email,
                 revoked,
@@ -386,6 +389,15 @@ public class AuthServer {
     @HttpPath(path = "/favicon.ico")
     public void favIcon(HttpExchange exchange) throws Exception {
         sendFileDownload(exchange, faviconICO, "favicon.png");
+    }
+
+    @HttpPath(path = "/style.css")
+    public void styling(HttpExchange exchange) throws Exception {
+        exchange.getResponseHeaders().add("Link", "rel=stylesheet href=style.css");
+        exchange.sendResponseHeaders(HTTP_OK, styleCSS.length());
+        OutputStream outputStream = exchange.getResponseBody();
+        outputStream.write(styleCSS.getBytes());
+        outputStream.close();
     }
 
     @HttpPath(path = "/upload")
