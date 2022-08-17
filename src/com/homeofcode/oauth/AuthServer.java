@@ -10,11 +10,14 @@ import org.bouncycastle.asn1.x500.AttributeTypeAndValue;
 import org.bouncycastle.asn1.x500.RDN;
 import org.bouncycastle.asn1.x500.X500Name;
 import org.bouncycastle.asn1.x500.style.RFC4519Style;
+import org.bouncycastle.asn1.x509.CRLReason;
 import org.bouncycastle.cert.X509CertificateHolder;
+import org.bouncycastle.cert.X509v2CRLBuilder;
 import org.bouncycastle.cert.X509v3CertificateBuilder;
 import org.bouncycastle.crypto.util.PrivateKeyFactory;
 import org.bouncycastle.openssl.PEMParser;
 import org.bouncycastle.openssl.jcajce.JcaPEMWriter;
+import org.bouncycastle.operator.ContentSigner;
 import org.bouncycastle.operator.DefaultDigestAlgorithmIdentifierFinder;
 import org.bouncycastle.operator.DefaultSignatureAlgorithmIdentifierFinder;
 import org.bouncycastle.operator.OperatorCreationException;
@@ -415,6 +418,46 @@ public class AuthServer {
         redirect(exchange, authURL);
     }
 
+    @HttpPath(path = "/crl")
+    public void returnCRL(HttpExchange exchange) throws Exception {
+        //X500 Name comes from X509Certificate and use getSubject()
+        var caParser = new PEMParser(new FileReader(CAPrivateKey));
+        var caPriv = (PrivateKeyInfo) caParser.readObject();
+        caParser = new PEMParser(new FileReader(CACert));
+        var caCert = (X509CertificateHolder) caParser.readObject();
+        X509v2CRLBuilder crlBuilder = new X509v2CRLBuilder(
+                caCert.getSubject(),
+                Calendar.getInstance().getTime()
+        );
+        String query = "select serialNumber from certificate where revoked = True";
+        try (Statement ps = connection.createStatement()) {
+            boolean rc = ps.execute(query);
+            if (rc) {
+                ResultSet rs = ps.getResultSet();
+                while (rs.next()) {
+                    var sn = rs.getString(1);
+                    var date = new java.util.Date();
+                    var superseded = CRLReason.superseded;
+                    crlBuilder.addCRLEntry(new BigInteger(sn), date, superseded);
+                }
+            }
+        } catch (SQLException sqlE) {
+            Cli.error("Problem selecting serial number from certificate where revoked = true; " + sqlE);
+        }
+        var sigAlgId = new DefaultSignatureAlgorithmIdentifierFinder().find("SHA1withRSA");
+        var digAlgId = new DefaultDigestAlgorithmIdentifierFinder().find(sigAlgId);
+        var signer = new BcRSAContentSignerBuilder(sigAlgId, digAlgId).build(
+                PrivateKeyFactory.createKey(caPriv.getEncoded()));
+        //need both certificate and private key
+        var holder = crlBuilder.build((ContentSigner) signer);
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        var writer = new JcaPEMWriter(new OutputStreamWriter(baos));
+        writer.writeObject(holder);
+        writer.close();
+        byte[] bytes = baos.toByteArray();
+        sendFileDownload(exchange, bytes, "crl.pem");
+    }
+
     @HttpPath(path = "/login")
     synchronized public void loginPage(HttpExchange exchange) throws Exception {
         var nonce = extractParams(exchange).get("nonce");
@@ -508,7 +551,7 @@ public class AuthServer {
         String getSigned = null;
         //String query = "select signedCertificate from certificates where revoked = False and email = ?;";
         try (Statement stmt = connection.createStatement()) {
-            boolean rc = stmt.execute(String.format("select signedCertificate from certificates where revoked = False" +
+            boolean rc = stmt.execute(String.format("select signedCertificate from certificate where revoked = False" +
                     " and email = \"%s\";", email));
             if (rc) {
                 ResultSet rs = stmt.getResultSet();
