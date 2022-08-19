@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<module external.linked.project.id="oauthcert:main" external.linked.project.path="$MODULE_DIR$/../.." external.root.project.path="$MODULE_DIR$/../.." external.system.id="GRADLE" external.system.module.group="" external.system.module.type="sourceSet" external.system.module.version="unspecified" type="JAVA_MODULE" version="4">
+  <component name="NewModuleRootManager">
+    <output url="file://$MODULE_DIR$/../../build/classes/java/main" />
+    <exclude-output />
+    <content url="file://$MODULE_DIR$/../../res">
+      <sourceFolder url="file://$MODULE_DIR$/../../res" type="java-resource" />
+    </content>
+    <content url="file://$MODULE_DIR$/../../src">
+      <sourceFolder url="file://$MODULE_DIR$/../../src" isTestSource="false" />
+    </content>
+    <orderEntry type="inheritedJdk" />
+    <orderEntry type="sourceFolder" forTests="false" />
+    <orderEntry type="library" name="Gradle: org.bouncycastle:bcpkix-jdk15on:1.70" level="project" />
+    <orderEntry type="library" name="Gradle: org.json:json:20220320" level="project" />
+    <orderEntry type="library" name="Gradle: info.picocli:picocli-codegen:4.6.2" level="project" />
+    <orderEntry type="library" name="Gradle: org.xerial:sqlite-jdbc:3.36.0.3" level="project" />
+    <orderEntry type="library" name="Gradle: org.bouncycastle:bcutil-jdk15on:1.70" level="project" />
+    <orderEntry type="library" name="Gradle: org.bouncycastle:bcprov-jdk15on:1.70" level="project" />
+    <orderEntry type="library" name="Gradle: info.picocli:picocli:4.6.2" level="project" />
+  </component>
+</module>
