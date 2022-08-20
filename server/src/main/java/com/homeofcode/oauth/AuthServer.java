@@ -580,7 +580,7 @@ public class AuthServer {
             Cli.error("problem getting certificate from email: " + email + " " + e);
         }
         if (getSigned != null) {
-            sendFileDownload(exchange, getSigned.getBytes(), "signed.csr");
+            sendFileDownload(exchange, getSigned.getBytes(), String.format("%s.crt", email));
         } else {
             redirect(exchange, String.format("/login/error?error=%s",
                     URLEncoder.encode("Could not find signed certificate for " + email, Charset.defaultCharset())));
