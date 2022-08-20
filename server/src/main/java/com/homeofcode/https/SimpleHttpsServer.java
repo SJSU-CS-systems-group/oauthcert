@@ -42,27 +42,24 @@ public class SimpleHttpsServer {
      */
     public static final char[] noPass = "noPass".toCharArray();
 
-    public static final Path keyPath = Path.of("key.pem");
-    public static final Path serverCertPath = Path.of("server.pem");
-
     private static final String pemKeyConst = "BEGIN PRIVATE KEY";
     private static final String pemCertConst = "BEGIN CERTIFICATE";
     private static final Pattern pemRE = Pattern.compile("---*([^-\n]+)-+\n([^-]+)\n---*([^-]+)-+\n");
     static System.Logger LOG = System.getLogger(SimpleHttpsServer.class.getPackageName());
     private final HttpServer httpsServer;
 
-    public SimpleHttpsServer(int port, boolean useTLS) throws IOException, NoSuchAlgorithmException {
-        if (useTLS) {
+    public SimpleHttpsServer(int port, Path keyPath, Path certPath) throws IOException, NoSuchAlgorithmException {
+        if (certPath != null && keyPath != null) {
             SSLContext sslContext = SSLContext.getInstance("TLS");
             try {
-                KeyStore ks = getKeyStore();
+                KeyStore ks = getKeyStore(keyPath, certPath);
                 KeyManagerFactory kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
                 kmf.init(ks, noPass);
                 TrustManagerFactory tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
                 tmf.init(ks);
                 sslContext.init(kmf.getKeyManagers(), tmf.getTrustManagers(), null);
             } catch (Exception e) {
-                System.out.println(e.getMessage());
+                System.out.println(e);
                 System.exit(2);
             }
             var tlsServer = HttpsServer.create();
@@ -90,19 +87,20 @@ public class SimpleHttpsServer {
     }
 
     // code snippet from https://stackoverflow.com/questions/42675033/how-to-build-a-sslsocketfactory-from-pem-certificate-and-key-without-converting
-    private KeyStore getKeyStore() throws KeyStoreException, CertificateException, IOException,
+    private KeyStore getKeyStore(Path keyPath, Path certPath) throws KeyStoreException, CertificateException,
+            IOException,
             NoSuchAlgorithmException,
             InvalidKeySpecException {
         KeyStore ks = KeyStore.getInstance(KeyStore.getDefaultType());
         ks.load(null, null);
-        byte[] keyBytes = getPemBytes(SimpleHttpsServer.keyPath, SimpleHttpsServer.pemKeyConst);
+        byte[] keyBytes = getPemBytes(keyPath, SimpleHttpsServer.pemKeyConst);
         PKCS8EncodedKeySpec spec = new PKCS8EncodedKeySpec(keyBytes);
         var alg = spec.getAlgorithm();
         if (alg == null) alg = "RSA";
         KeyFactory kf = KeyFactory.getInstance(alg);
         Key serverKey = kf.generatePrivate(spec);
         CertificateFactory cf = CertificateFactory.getInstance("X509");
-        byte[] certBytes = getPemBytes(SimpleHttpsServer.serverCertPath, SimpleHttpsServer.pemCertConst);
+        byte[] certBytes = getPemBytes(certPath, SimpleHttpsServer.pemCertConst);
         Certificate serverCertificate = cf.generateCertificate(new ByteArrayInputStream(certBytes));
         ks.setKeyEntry("serverKey", serverKey, SimpleHttpsServer.noPass, new Certificate[]{serverCertificate});
         ks.setCertificateEntry("serverCert", serverCertificate);
@@ -134,6 +132,7 @@ public class SimpleHttpsServer {
                     m.invoke(appServer, exchange);
                     LOG.log(System.Logger.Level.INFO, "done handling {0}", exchange.getRequestURI());
                 } catch (Throwable e) {
+                    e.printStackTrace();
                     if (e instanceof InvocationTargetException && e.getCause() != null) {
                         e = e.getCause();
                     }
