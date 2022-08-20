@@ -674,27 +674,35 @@ public class AuthServer {
             return 0;
         }
 
-        @CommandLine.Command(name = "serve", mixinStandardHelpOptions = true,
-                description = "start https verify endpoint.")
-        int serve(@CommandLine.Parameters(paramLabel = "prop_file",
-                description = "property file containing config and creds.")
-                          FileReader propFile,
-                  @CommandLine.Option(names = "--port", defaultValue = "443",
-                          description = "TCP port to listen for web connections.",
-                          showDefaultValue = Help.Visibility.ALWAYS)
-                          int port,
-                  @CommandLine.Option(names = "--noTLS",
-                          description = "turn off TLS for web connections.",
-                          showDefaultValue = Help.Visibility.ALWAYS)
-                          boolean noTLS
-        ) {
+        @CommandLine.Command(name = "serve", mixinStandardHelpOptions = true, description = "start https verify endpoint.")
+        int serve(
+                @CommandLine.Parameters(paramLabel = "prop_file", description = "property file containing config and creds.") FileReader propFile,
+                @CommandLine.Option(names = "--port", defaultValue = "443", description = "TCP port to listen for web connections.", showDefaultValue = Help.Visibility.ALWAYS) int port,
+                @CommandLine.Option(names = "--noTLS", description = "turn off TLS for web connections.", showDefaultValue = Help.Visibility.ALWAYS) boolean noTLS) {
             try {
                 var props = new Properties();
                 props.load(propFile);
 
                 var authServer = new AuthServer(props);
 
-                var simpleHttpsServer = new SimpleHttpsServer(port, !noTLS);
+                if (noTLS) {
+                    if (props.remove("serverCert") != null) {
+                        error("ignoring serverCert property due to noTLS flag.");
+                    }
+                    if (props.remove("serverKey") != null) {
+                        error("ignoring serverKey property due to noTLS flag.");
+                    }
+                }
+
+                Path serverCert = props.containsKey("serverCert") ? Path.of((String) props.get("serverCert")) : null;
+                Path serverKey = props.containsKey("serverKey") ? Path.of((String) props.get("serverKey")) : null;
+
+                if (serverCert == null || serverKey == null) {
+                    info("TLS is not being used. cert or key is not set.");
+                } else {
+                    info("TLS will be used.");
+                }
+                var simpleHttpsServer = new SimpleHttpsServer(port, serverKey, serverCert);
                 var added = simpleHttpsServer.addToHttpsServer(authServer);
                 for (var add : added) {
                     LOG.log(INFO, "added {0}", add);
