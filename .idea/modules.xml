@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/oauthcert.iml" filepath="$PROJECT_DIR$/oauthcert.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/oauthcert.iml" filepath="$PROJECT_DIR$/.idea/oauthcert.iml" />
     </modules>
   </component>
 </project>
