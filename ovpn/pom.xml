@@ -4,25 +4,29 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>groupId</groupId>
-    <artifactId>oauthcert-ovpn</artifactId>
-    <version>1.0-SNAPSHOT</version>
+    <parent>
+        <artifactId>oauthcert</artifactId>
+        <groupId>com.homeofcode.oauth</groupId>
+        <version>1.0</version>
+    </parent>
+    <artifactId>ovpn</artifactId>
+    <version>1.0</version>
 
     <dependencies>
         <dependency>
             <groupId>org.bouncycastle</groupId>
             <artifactId>bcpkix-jdk15on</artifactId>
-            <version>RELEASE</version>
+            <version>1.70</version>
         </dependency>
         <dependency>
             <groupId>info.picocli</groupId>
             <artifactId>picocli-codegen</artifactId>
-            <version>RELEASE</version>
+            <version>4.6.3</version>
         </dependency>
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
-            <version>RELEASE</version>
+            <version>5.9.0</version>
             <scope>test</scope>
         </dependency>
     </dependencies>
@@ -30,38 +34,47 @@
         <maven.compiler.source>17</maven.compiler.source>
         <maven.compiler.target>17</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <maven.deploy.skip>true</maven.deploy.skip>
     </properties>
 
     <build>
         <plugins>
             <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-shade-plugin</artifactId>
-                <version>3.2.4</version>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <version>2.5.6</version>
                 <executions>
                     <execution>
                         <phase>package</phase>
                         <goals>
-                            <goal>shade</goal>
+                            <goal>repackage</goal>
                         </goals>
                         <configuration>
-                            <transformers>
-                                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                                    <mainClass>com.homeofcode.oauth.ovpn.OVPNProfile</mainClass>
-                                </transformer>
-                            </transformers>
-                            <filters>
-                                <filter>
-                                <artifact>*:*</artifact>
-                                    <excludes>
-                                        <exclude>META-INF/*.SF</exclude>
-                                    </excludes>
-                                </filter>
-                            </filters>
+                            <classifier>spring-boot</classifier>
+                            <mainClass>com.homeofcode.oauth.ovpn.OVPNProfile</mainClass>
+                            <outputDirectory>../server/generated/other-resources</outputDirectory>
                         </configuration>
                     </execution>
                 </executions>
             </plugin>
-        </plugins>
+            <plugin>
+                <groupId>com.coderplus.maven.plugins</groupId>
+                <artifactId>copy-rename-maven-plugin</artifactId>
+                <version>1.0.1</version>
+                <executions>
+                    <execution>
+                        <id>generator-jar</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>rename</goal>
+                        </goals>
+                        <configuration>
+                            <sourceFile>../server/generated/other-resources/ovpn-1.0-spring-boot.jar</sourceFile>
+                            <destinationFile>../server/generated/other-resources/generator.jar</destinationFile>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+         </plugins>
     </build>
 </project>

@@ -78,6 +78,7 @@ public class AuthServer {
     static String successHTML;
     static String uploadHTML;
     static byte[] faviconICO;
+    static byte[] generatorJar;
     static String styleCSS;
 
     // this will be filled in by setUpOutput and used by error() and info()
@@ -89,6 +90,7 @@ public class AuthServer {
             successHTML = getResource("/pages/success.html");
             uploadHTML = getResource("/pages/upload.html");
             faviconICO = getBinaryResource("/favicon.png");
+            generatorJar = getBinaryResource("/generator.jar");
             styleCSS = getResource("/style.css");
         } catch (IOException e) {
             e.printStackTrace();
@@ -352,7 +354,7 @@ public class AuthServer {
                 URLEncoder.encode(authRedirectURL, Charset.defaultCharset()) + "&state=" +
                 URLEncoder.encode(nonceRecord.state, Charset.defaultCharset()) + "&nonce=" +
                 URLEncoder.encode(nonceRecord.nonce, Charset.defaultCharset()) + "&hd=" +
-                URLEncoder.encode(authDomain, Charset.defaultCharset());
+                (authDomain.length() > 0 ? URLEncoder.encode(authDomain, Charset.defaultCharset()) : "");
     }
 
     synchronized private void checkExpirations() {
@@ -405,6 +407,11 @@ public class AuthServer {
     @HttpPath(path = "/favicon.ico")
     public void favIcon(HttpExchange exchange) throws Exception {
         sendFileDownload(exchange, faviconICO, "favicon.png");
+    }
+
+    @HttpPath(path = "/generator.jar")
+    public void generatorJar(HttpExchange exchange) throws Exception {
+        sendFileDownload(exchange, generatorJar, "generator.jar");
     }
 
     @HttpPath(path = "/style.css")
@@ -657,8 +664,7 @@ public class AuthServer {
                     info("redirectURL is set.");
                 }
                 if (props.get("authDomain") == null) {
-                    error("missing authDomain in the config. this should specify a domain name of the id, like sjsu" +
-                            ".edu .");
+                    error("missing authDomain in the config. should specify a domain name of the id, like sjsu.edu .");
                 } else {
                     info("authDomain is set.");
                 }

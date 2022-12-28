@@ -6,11 +6,14 @@
         <sourceOutputDir name="target/generated-sources/annotations" />
         <sourceTestOutputDir name="target/generated-test-sources/test-annotations" />
         <outputRelativeToContentRoot value="true" />
-        <module name="oauthcert" />
+        <module name="oauthcert-server" />
+        <module name="ovpn" />
+        <module name="server" />
       </profile>
     </annotationProcessing>
     <bytecodeTargetLevel>
-      <module name="oauthcert" target="17" />
+      <module name="generator" target="17" />
+      <module name="oauthcert-ovpn" target="17" />
     </bytecodeTargetLevel>
   </component>
 </project>

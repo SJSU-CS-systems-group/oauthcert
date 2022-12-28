@@ -132,7 +132,9 @@ public class OVPNProfile {
                 csrPemWriter.writeObject(csr);
             }
             Files.writeString(csrFile.toPath(), csrPem.toString());
-            info(String.format("Please go to %s to get the file %s signed and put the signed file in %s.", authUrl,
+            info(String.format(
+                    "Please go to %s and upload the file %s which was just generated. Download the CRT file to  %s.",
+                    authUrl,
                     csrFile.getCanonicalPath(), signedFile.getCanonicalPath()));
             String waitingString = String.format("Waiting for %s  ", signedFile.getCanonicalPath());
             System.out.print(waitingString);
