@@ -348,13 +348,13 @@ public class AuthServer {
         stmt.execute();
     }
 
-    private String createAuthURL(NonceRecord nonceRecord) {
+    private String createAuthURL(NonceRecord nonceRecord, String domain) {
         return authEndpoint + "?response_type=code&scope=openid%20email" + "&client_id=" +
                 URLEncoder.encode(clientId, Charset.defaultCharset()) + "&redirect_uri=" +
                 URLEncoder.encode(authRedirectURL, Charset.defaultCharset()) + "&state=" +
                 URLEncoder.encode(nonceRecord.state, Charset.defaultCharset()) + "&nonce=" +
                 URLEncoder.encode(nonceRecord.nonce, Charset.defaultCharset()) + "&hd=" +
-                (authDomain.length() > 0 ? URLEncoder.encode(authDomain, Charset.defaultCharset()) : "");
+                (domain.length() > 0 ? URLEncoder.encode(domain, Charset.defaultCharset()) : "");
     }
 
     synchronized private void checkExpirations() {
@@ -435,17 +435,28 @@ public class AuthServer {
                     URLEncoder.encode("Invalid CSR received.", Charset.defaultCharset())));
             return;
         }
-        if (!email.contains("@")) {
+        int domainIndex = email.indexOf('@');
+        if (domainIndex == -1) {
             redirect(exchange, String.format("/login/error?error=%s", URLEncoder.encode(
                     String.format("The CN field of the CSR does not appear to be an email: %s.", email),
                     Charset.defaultCharset())));
             return;
         }
+
+
+        String domain = email.substring(domainIndex+1);
+        if (authDomain != null && !domain.endsWith(authDomain)) {
+            redirect(exchange, String.format("/login/error?error=%s", URLEncoder.encode(
+                    String.format("%s is not from required domain: %s.", email, authDomain),
+                    Charset.defaultCharset())));
+            return;
+        }
+
         //nonce
         String nonce = new BigInteger(128, rand).toString();
         var nonceRecord = new NonceRecord(nonce, Long.toHexString(rand.nextLong()),
                 LocalDateTime.now().plus(5, ChronoUnit.MINUTES), new CompletableFuture<>(), bytes);
-        var authURL = createAuthURL(nonceRecord);
+        var authURL = createAuthURL(nonceRecord, domain);
         nonces.put(nonce, nonceRecord);
         redirect(exchange, authURL);
     }
@@ -479,15 +490,6 @@ public class AuthServer {
         writer.close();
         byte[] bytes = baos.toByteArray();
         sendFileDownload(exchange, bytes, "crl.pem");
-    }
-
-    @HttpPath(path = "/login")
-    synchronized public void loginPage(HttpExchange exchange) throws Exception {
-        var nonce = extractParams(exchange).get("nonce");
-        var nonceRecord = nonces.get(nonce);
-        var authURL = createAuthURL(nonceRecord);
-        nonces.put(nonce, nonceRecord);
-        redirect(exchange, authURL);
     }
 
     @HttpPath(path = LOGIN_CALLBACK)
@@ -594,10 +596,6 @@ public class AuthServer {
         }
     }
 
-    String getValidateURL(NonceRecord nr) {
-        return String.format("%s/login?nonce=%s", httpsURLPrefix, nr.nonce);
-    }
-
     record NonceRecord(String nonce, String state, LocalDateTime expireTime, CompletableFuture<String> future,
                        byte[] csr) {
         void complete(String email) {
@@ -664,7 +662,7 @@ public class AuthServer {
                     info("redirectURL is set.");
                 }
                 if (props.get("authDomain") == null) {
-                    error("missing authDomain in the config. should specify a domain name of the id, like sjsu.edu .");
+                    info("missing authDomain in the config. any domain will be used.");
                 } else {
                     info("authDomain is set.");
                 }
